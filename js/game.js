@@ -56,12 +56,14 @@ function glowSprite(key, r, build) {
   spriteCache.set(k, s);
   return s;
 }
-function pBulletSprite(r) {
-  return glowSprite('p', r, (g, R) => {
+function pBulletSprite(r, col) {
+  col = col || '#6edcff';
+  return glowSprite('p' + col, r, (g, R) => {
+    const cr = parseInt(col.slice(1, 3), 16), cg = parseInt(col.slice(3, 5), 16), cb = parseInt(col.slice(5, 7), 16);
     const grad = g.createRadialGradient(R, R, 0, R, R, R);
     grad.addColorStop(0, 'rgba(255,255,255,.95)');
-    grad.addColorStop(0.4, 'rgba(110,220,255,.55)');
-    grad.addColorStop(1, 'rgba(110,220,255,0)');
+    grad.addColorStop(0.4, `rgba(${cr},${cg},${cb},.55)`);
+    grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
     g.fillStyle = grad; g.fillRect(0, 0, R * 2, R * 2);
   });
 }
@@ -191,7 +193,7 @@ function newRun() {
     gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18,
     rippleActive: 0, bladeCd: [], rampStart: null, rampMult: 1, pulseT: 0, rebirthT: 0, adrenT: 0,
     missileT: 2, turretT: 3, vortexT: 4, heatT: 0,
-    healAcc: 0, healT: 0, xpAcc: 0, xpT: 0,
+    healAcc: 0, healT: 0, xpAcc: 0, xpT: 0, prevSyn: [], pools: [],
     eliteT: 20, eliteSpoils: 0,
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
     turrets: [], vortices: [],
@@ -230,6 +232,7 @@ function recompute() {
     drones: 0, missiles: 0, missileCd: 0, boom: 0,
     frost: 0, knock: 0, turrets: 0, turretCd: 0, vortex: 0, vortexCd: 0,
     graze: 0, grazeR: 0, grazeHeat: 0, ram: 0,
+    syn: {}, synList: [], bulletCol: '#6edcff',
   };
   s.dmg *= 1 + 0.04 * G.ess.dmg;
   s.dmg *= 1 + 0.015 * Math.max(0, (G.level || 1) - 1); // every level-up grows damage
@@ -372,6 +375,32 @@ function recompute() {
     }
   }
 
+  // SYNERGIES — Isaac-style: pairs living inside the same fusion unlock behaviors
+  for (const u of G.units) {
+    if (u.kind !== 'fusion') continue;
+    for (const syn of synergiesOfUnit(u)) {
+      if (!s.syn[syn.slug]) { s.syn[syn.slug] = true; s.synList.push(syn); }
+    }
+  }
+  if (s.syn.stormseek) s.arc = Math.min(0.8, s.arc + 0.15);
+  if (s.syn.phantomneedle) s.hitR = Math.max(1.3, s.hitR * 0.85);
+
+  // bullet tint — your shots visibly carry your build's elements
+  const TINTS = { bomb: '#ff8a3a', frost: '#7adfff', arc: '#ffe94a', boom: '#ff6a4a', chase: '#c8a0ff', crit: '#ffd24a' };
+  const ownedTints = [];
+  for (const u of G.units) {
+    walkUnit(u, (key) => {
+      if (TINTS[key] && !ownedTints.includes(TINTS[key])) ownedTints.push(TINTS[key]);
+    });
+  }
+  if (ownedTints.length) {
+    const mix = ownedTints.slice(0, 3).concat('#6edcff');
+    let r = 0, g = 0, b = 0;
+    for (const h of mix) { r += parseInt(h.slice(1, 3), 16); g += parseInt(h.slice(3, 5), 16); b += parseInt(h.slice(5, 7), 16); }
+    const n = mix.length;
+    s.bulletCol = '#' + [r, g, b].map(v => Math.round(v / n).toString(16).padStart(2, '0')).join('');
+  }
+
   const oldMax = G.stats ? G.stats.maxHp : s.maxHp;
   G.stats = s;
   if (s.maxHp > oldMax) G.hp = Math.min(s.maxHp, G.hp + (s.maxHp - oldMax)); // growing maxHp heals the difference
@@ -405,7 +434,11 @@ function applyCard(card) {
     G.shake = Math.max(G.shake, 10);
     SFX.mythic();
   }
-  // automatic fusions — may ladder (Fused → Ascended → …), one banner each
+  postBuildChange();
+}
+
+// automatic fusions + recompute + Isaac-style synergy discovery banners
+function postBuildChange() {
   let f;
   while ((f = autoFuse(G.units))) {
     G.fusions++;
@@ -414,6 +447,15 @@ function applyCard(card) {
     if (f.unit.tier === 5 || f.kind === 'overcharge') SFX.mythic(); else SFX.fuse();
   }
   recompute();
+  const prev = G.prevSyn || [];
+  for (const syn of G.stats.synList) {
+    if (!prev.includes(syn.slug)) {
+      G.bannerQ.push({ title: '⚡ SYNERGY — ' + syn.name.toUpperCase(), subtitle: syn.desc });
+      if (G.bannerQ.length > 6) G.bannerQ.shift();
+      SFX.mythic();
+    }
+  }
+  G.prevSyn = G.stats.synList.map(x => x.slug);
 }
 
 function announce(txt, color) {
@@ -680,26 +722,35 @@ function fireNova() {
     poolPush(G.pB, CAP.pB, {
       x: G.px, y: G.py, vx: Math.cos(a) * 300, vy: Math.sin(a) * 300,
       t: 0, life: 1.1, size: s.size * 0.9, dmg: s.dmg * 0.8,
-      pierce: s.pierce, bounce: 0, homing: 0, hit: null,
+      pierce: s.pierce, bounce: 0, homing: 0, hit: null, chill: s.syn.icering,
     });
   }
+}
+
+function beamFrom(x, y, a, dmg, w, range) {
+  const cos = Math.cos(a), sin = Math.sin(a);
+  nearEnemies(x + cos * range / 2, y + sin * range / 2, range / 2 + 90, _near);
+  for (const en of _near) {
+    const rx = en.x - x, ry = en.y - y;
+    const fwd = rx * cos + ry * sin;
+    if (fwd < 0 || fwd > range) continue;
+    if (Math.abs(rx * -sin + ry * cos) < w + en.r) hitEnemy(en, dmg);
+  }
+  G.beams.push({ x, y, a, len: range, w, color: '#8af0ff', t: 0, life: 0.16 });
 }
 
 function fireLaser() {
   const s = G.stats, t = nearestEnemy(G.px, G.py);
   if (!t) return;
   const a = Math.atan2(t.y - G.py, t.x - G.px);
-  const range = 620, w = 9 + s.laserLv;
-  const cos = Math.cos(a), sin = Math.sin(a);
-  const dmg = s.dmg * (1.2 + 0.35 * s.laserLv);
-  nearEnemies(G.px + cos * range / 2, G.py + sin * range / 2, range / 2 + 90, _near);
-  for (const en of _near) {
-    const rx = en.x - G.px, ry = en.y - G.py;
-    const fwd = rx * cos + ry * sin;
-    if (fwd < 0 || fwd > range) continue;
-    if (Math.abs(rx * -sin + ry * cos) < w + en.r) hitEnemy(en, dmg);
+  beamFrom(G.px, G.py, a, s.dmg * (1.2 + 0.35 * s.laserLv), 9 + s.laserLv, 620);
+  if (s.syn.beamdrones && s.drones > 0) { // SYNERGY: every drone fires a mini-beam
+    for (let i = 0; i < s.drones; i++) {
+      const p = dronePos(i, s.drones);
+      const t2 = nearestEnemy(p.x, p.y);
+      if (t2) beamFrom(p.x, p.y, Math.atan2(t2.y - p.y, t2.x - p.x), s.dmg * 0.5, 4, 420);
+    }
   }
-  G.beams.push({ x: G.px, y: G.py, a, len: range, w, color: '#8af0ff', t: 0, life: 0.16 });
 }
 
 function bomb(x, y, r, dmg) {
@@ -719,7 +770,9 @@ function bomb(x, y, r, dmg) {
 // ---------------------------------------------------------------------------
 function hitEnemy(en, dmg, noArc) {
   const s = G.stats;
-  const isCrit = Math.random() < s.crit;
+  // SYNERGY Bullet Waltz: +10% crit while graze-heat is hot
+  const critCh = s.crit + (G.heatT > 0 && s.syn.bulletwaltz ? 0.10 : 0);
+  const isCrit = Math.random() < critCh;
   const d = dmg * (isCrit ? s.critMult : 1) * (G.rampMult || 1)
     * (G.heatT > 0 ? 1 + s.grazeHeat : 1); // Graze heat
   en.hp -= d;
@@ -728,13 +781,20 @@ function hitEnemy(en, dmg, noArc) {
   if (s.lifesteal > 0) G.hp = Math.min(s.maxHp, G.hp + d * s.lifesteal);
   if (isCrit) burst(en.x, en.y, '#ffd24a', 3, 150);
   // Chain Arc — lightning jumps to the nearest other enemy
+  // (SYNERGY Rail Storm: the chain keeps jumping, 3 hops instead of 1)
   if (!noArc && s.arc > 0 && Math.random() < s.arc) {
-    nearEnemies(en.x, en.y, 180, _near);
-    let best = null, bd = 180 * 180;
-    for (const o of _near) { if (o === en || o.hp <= 0) continue; const q = dist2(en.x, en.y, o.x, o.y); if (q < bd) { bd = q; best = o; } }
-    if (best) {
-      G.beams.push({ x: en.x, y: en.y, a: Math.atan2(best.y - en.y, best.x - en.x), len: Math.sqrt(bd), w: 2, color: '#ffe94a', t: 0, life: 0.1 });
+    const hops = s.syn.railstorm ? 3 : 1;
+    let src = en;
+    const visited = [en];
+    for (let h = 0; h < hops; h++) {
+      nearEnemies(src.x, src.y, 180, _near);
+      let best = null, bd = 180 * 180;
+      for (const o of _near) { if (visited.includes(o) || o.hp <= 0) continue; const q = dist2(src.x, src.y, o.x, o.y); if (q < bd) { bd = q; best = o; } }
+      if (!best) break;
+      G.beams.push({ x: src.x, y: src.y, a: Math.atan2(best.y - src.y, best.x - src.x), len: Math.sqrt(bd), w: 2, color: '#ffe94a', t: 0, life: 0.1 });
       hitEnemy(best, dmg * 0.6, true);
+      visited.push(best);
+      src = best;
     }
   }
   // Fire Rounds — ignite: the hit keeps burning (strongest burn wins)
@@ -751,9 +811,12 @@ function hitEnemy(en, dmg, noArc) {
     en.kx += kdx / kd * kk; en.ky += kdy / kd * kk;
   }
   // Executioner — finish weakened non-boss enemies
-  if (s.cull > 0 && !en.boss && en.hp > 0 && en.hp < en.maxHp * s.cull) {
+  // (SYNERGY Shatterpoint: chilled enemies cull at DOUBLE the threshold)
+  const cullAt = s.cull * (s.syn.shatterpoint && en.chillT > 0 ? 2 : 1);
+  if (s.cull > 0 && !en.boss && en.hp > 0 && en.hp < en.maxHp * cullAt) {
     en.hp = 0;
     burst(en.x, en.y, '#ff2a5a', 5, 160);
+    if (s.syn.soulharvest) G.hp = Math.min(s.maxHp, G.hp + s.maxHp * 0.02); // SYNERGY
   }
   if (en.hp <= 0) killEnemy(en);
   return d;
@@ -1363,6 +1426,15 @@ function updateEnemy(en, dt) {
     if (s.ram > 0 && en.ramCd <= 0) {         // Ram — contact hurts THEM
       en.ramCd = 0.3;
       hitEnemy(en, s.dmg * s.ram, true);
+      if (s.syn.batteringram) { // SYNERGY: collisions shockwave everything back
+        nearEnemies(G.px, G.py, 140, _near);
+        for (const o of _near) {
+          if (o.boss || o.hp <= 0) continue;
+          const od = Math.hypot(o.x - G.px, o.y - G.py) || 1;
+          o.kx += (o.x - G.px) / od * 320; o.ky += (o.y - G.py) / od * 320;
+        }
+        burst(G.px, G.py, '#ffd24a', 10, 260);
+      }
       if (en.hp <= 0) return;
     }
     if (G.iT <= 0) hurtPlayer(en.dmg);
@@ -1391,6 +1463,7 @@ function hurtPlayer(dmg) {
       if (dist2(G.eB[i].x, G.eB[i].y, G.px, G.py) < 80 * 80) { G.eB[i] = G.eB[G.eB.length - 1]; G.eB.pop(); }
     }
     if (s.guardian) blast(G.px, G.py, 160, s.dmg * 2.5);
+    if (s.syn.retaliation) blast(G.px, G.py, 150, s.dmg * (0.8 + 0.3 * s.thorns)); // SYNERGY
     return;
   }
   dmg = Math.max(1, dmg - s.armor); // Armor — flat reduction
@@ -1497,7 +1570,7 @@ function update(dt) {
       const t = nearestEnemy(tr.x, tr.y);
       if (!t) break;
       const a = Math.atan2(t.y - tr.y, t.x - tr.x);
-      poolPush(G.pB, CAP.pB, { x: tr.x, y: tr.y, vx: Math.cos(a) * 380, vy: Math.sin(a) * 380, t: 0, life: 1.4, size: 4.5, dmg: s.dmg * 0.55, pierce: 0, bounce: 0, homing: 0, hit: null });
+      poolPush(G.pB, CAP.pB, { x: tr.x, y: tr.y, vx: Math.cos(a) * 380, vy: Math.sin(a) * 380, t: 0, life: 1.4, size: 4.5, dmg: s.dmg * 0.55, pierce: 0, bounce: 0, homing: 0, hit: null, mBlast: s.syn.missilebattery }); // SYNERGY: exploding turret shots
     }
   }
   if (s.vortex > 0) {                                             // Vortex rifts
@@ -1563,6 +1636,10 @@ function update(dt) {
       for (const en of _near) {
         if (en.hp > 0 && dist2(bx, by, en.x, en.y) < (16 + en.r) * (16 + en.r)) {
           hitEnemy(en, s.dmg * 0.8);
+          if (s.syn.flamewheel && en.hp > 0) { // SYNERGY: blades ignite
+            en.burnDps = Math.max(en.burnDps, s.dmg * 0.35);
+            en.burnT = 2.2;
+          }
           G.bladeCd[i] = 0.28;
           break;
         }
@@ -1588,8 +1665,10 @@ function update(dt) {
     }
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.bounce > 0) {
-      if ((b.x < 6 && b.vx < 0) || (b.x > W - 6 && b.vx > 0)) { b.vx = -b.vx; b.bounce--; }
-      if ((b.y < 6 && b.vy < 0) || (b.y > H - 6 && b.vy > 0)) { b.vy = -b.vy; b.bounce--; }
+      let bounced = false;
+      if ((b.x < 6 && b.vx < 0) || (b.x > W - 6 && b.vx > 0)) { b.vx = -b.vx; b.bounce--; bounced = true; }
+      if ((b.y < 6 && b.vy < 0) || (b.y > H - 6 && b.vy > 0)) { b.vy = -b.vy; b.bounce--; bounced = true; }
+      if (bounced && s.syn.blastric) blast(b.x, b.y, 44, b.dmg * 0.5); // SYNERGY: detonating ricochets
     } else if (b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30) dead = true;
 
     if (!dead) {
@@ -1607,8 +1686,25 @@ function update(dt) {
             dmgMod = dot < -0.25 ? 0.25 : dot > 0.25 ? 1.5 : 1;
           }
           hitEnemy(en, b.dmg * dmgMod);
-          if (b.mBlast) { blast(b.x, b.y, 46, b.dmg * 0.6); dead = true; break; } // Missiles
-          if (s.splashR > 0) blast(b.x, b.y, s.splashR, b.dmg * s.splashDmg); // Splash Rounds
+          if (b.chill && en.hp > 0) { en.chillT = 1.2; en.chillF = 0.4; } // SYNERGY Ice Ring
+          if (b.mBlast) {
+            blast(b.x, b.y, 46, b.dmg * 0.6); // Missiles
+            if (s.syn.cluster) { // SYNERGY: cluster warheads
+              for (let k = 0; k < 3; k++) {
+                const ca = Math.random() * TAU;
+                poolPush(G.pB, CAP.pB, { x: b.x, y: b.y, vx: Math.cos(ca) * 300, vy: Math.sin(ca) * 300, t: 0, life: 0.9, size: 3.5, dmg: b.dmg * 0.35, pierce: 0, bounce: 0, homing: 3.5, hit: null });
+              }
+            }
+            dead = true; break;
+          }
+          if (s.splashR > 0) {
+            blast(b.x, b.y, s.splashR, b.dmg * s.splashDmg); // Splash Rounds
+            if (s.syn.napalm) poolPush(G.pools, 40, { x: b.x, y: b.y, r: 46, t: 0, dur: 2.4 }); // SYNERGY: burning ground
+            if (s.syn.cryoshatter) { // SYNERGY: splash chills
+              nearEnemies(b.x, b.y, s.splashR, _near);
+              for (const o of _near) if (o.hp > 0 && dist2(b.x, b.y, o.x, o.y) < s.splashR * s.splashR) { o.chillT = 1.2; o.chillF = 0.4; }
+            }
+          }
           if (s.boom > 0 && Math.random() < s.boom) blast(b.x, b.y, 46, b.dmg * 0.45); // Explosive Rounds
           if (b.pierce > 0) { b.pierce--; (b.hit || (b.hit = [])).push(en); }
           else { dead = true; break; }
@@ -1616,6 +1712,22 @@ function update(dt) {
       }
     }
     if (dead) { G.pB[i] = G.pB[G.pB.length - 1]; G.pB.pop(); }
+  }
+
+  // napalm ground fire
+  for (let i = G.pools.length - 1; i >= 0; i--) {
+    const pl = G.pools[i];
+    pl.t += dt;
+    if (pl.t >= pl.dur) { G.pools.splice(i, 1); continue; }
+    nearEnemies(pl.x, pl.y, pl.r, _near);
+    for (const en of _near) {
+      if (en.hp <= 0) continue;
+      if (dist2(pl.x, pl.y, en.x, en.y) < (pl.r + en.r) * (pl.r + en.r)) {
+        en.hp -= s.dmg * 0.6 * dt;
+        G.dmgDealt += s.dmg * 0.6 * dt;
+        if (en.hp <= 0) killEnemy(en);
+      }
+    }
   }
 
   // telegraphed blast zones (barrage + mortar)
@@ -1766,6 +1878,18 @@ function render() {
     ctx.beginPath(); ctx.arc(G.px, G.py, s.grazeR, 0, TAU); ctx.stroke();
   }
 
+  // napalm pools
+  for (const pl of G.pools) {
+    const k = 1 - pl.t / pl.dur;
+    ctx.fillStyle = '#ff7a2a';
+    ctx.globalAlpha = 0.14 * k + 0.05 * Math.sin(G.time * 11 + pl.x);
+    ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#ffb45a';
+    ctx.globalAlpha = 0.3 * k;
+    ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // barrage telegraphs
   for (const z of G.zones) {
     const k = z.t / z.tel;
@@ -1800,9 +1924,10 @@ function render() {
     ctx.drawImage(spr.c, g.x - spr.R, g.y - spr.R);
   }
 
-  // player bullets (quiet cyan)
+  // player bullets — tinted by your build's elements (Isaac-style tears)
+  const bCol = s ? s.bulletCol : '#6edcff';
   for (const b of G.pB) {
-    const spr = pBulletSprite(b.size);
+    const spr = pBulletSprite(b.size, bCol);
     ctx.drawImage(spr.c, b.x - spr.R, b.y - spr.R);
   }
 
@@ -2107,8 +2232,10 @@ function buildRecapHTML() {
     (s.splashR ? ` · splash ${Math.round(s.splashR)}px` : '') +
     (s.xpMult > 1 ? ` · xp +${Math.round((s.xpMult - 1) * 100)}%` : '') +
     (s.hitR < 3.5 ? ` · hitbox −${Math.round((1 - s.hitR / 3.5) * 100)}%` : '');
+  const synLine = s.synList.length
+    ? `<div style="margin-top:8px;color:#ffd24a;font-size:12px">SYNERGIES: ${s.synList.map(x => `<b>${x.name}</b> — ${x.desc}`).join(' · ')}</div>` : '';
   return `<div style="text-align:left;max-width:520px;margin:0 auto">${rows || '<i>nothing yet</i>'}</div>
-    <div style="margin-top:10px;color:var(--ink);font-size:13px">${totals}</div>`;
+    <div style="margin-top:10px;color:var(--ink);font-size:13px">${totals}</div>${synLine}`;
 }
 
 function die() {
@@ -2216,7 +2343,15 @@ window.__GAME__ = {
   levelUnit(i, n) { const u = G.units[i]; for (let k = 0; k < (n || 1); k++) applyCard({ type: 'level', u }); return u; },
   forceLevelUp() { G.pendingLevels++; },
   hurt(d) { hurtPlayer(d); },
-  fireVolley, spawnElite, startSuperBoss, totalWave, wardenTier, WARDEN_TIERS, ETYPES, waveScale, maxShooters, shooterCount,
+  debugFuse(aKey, bKey) {
+    const ua = makeFamilyUnit(aKey); ua.level = 3;
+    const ub = makeFamilyUnit(bKey); ub.level = 3;
+    G.units.push(ua, ub);
+    postBuildChange();
+    return G.units[G.units.length - 1];
+  },
+  SYNERGIES, synergiesOfUnit,
+  fireVolley, fireLaser, spawnElite, startSuperBoss, totalWave, wardenTier, WARDEN_TIERS, ETYPES, waveScale, maxShooters, shooterCount,
   hitEnemy,
   kill(en) { killEnemy(en); },
   get world() { return { W, H, zoom: ZOOM }; },

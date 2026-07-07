@@ -120,6 +120,56 @@ const CATS = {
 };
 
 // ---------------------------------------------------------------------------
+// SYNERGIES — Binding-of-Isaac-style pair behaviors. When a FUSION contains
+// both families anywhere in its tree, the combo unlocks a NEW mechanic (not
+// just bigger numbers). Keys are ordered by FAMILY_KEYS index, like names.
+// ---------------------------------------------------------------------------
+const SYNERGIES_RAW = [
+  ['bomb', 'mortar',    'napalm',        'Napalm',           'splash hits leave burning ground pools'],
+  ['mortar', 'frost',   'cryoshatter',   'Cryo Shatter',     'splash damage also chills everything it touches'],
+  ['frost', 'cull',     'shatterpoint',  'Shatterpoint',     'chilled enemies are executed at DOUBLE the cull threshold'],
+  ['pierce', 'arc',     'railstorm',     'Rail Storm',       'chain lightning jumps 2 extra times'],
+  ['chase', 'arc',      'stormseek',     'Storm Seekers',    '+15% arc chance'],
+  ['bounce', 'boom',    'blastric',      'Blast Ricochet',   'bullets detonate on every wall bounce'],
+  ['split', 'missiles', 'cluster',       'Cluster Warheads', 'missile explosions release homing shards'],
+  ['drones', 'laser',   'beamdrones',    'Beam Drones',      'your drones fire mini-beams alongside your laser'],
+  ['bomb', 'orbitals',  'flamewheel',    'Flame Wheel',      'orbital blades set enemies on fire'],
+  ['missiles', 'turret','missilebattery','Missile Battery',  'turret shots explode on impact'],
+  ['impact', 'ram',     'batteringram',  'Battering Ram',    'ramming blasts everything around you backwards'],
+  ['shield', 'thorns',  'retaliation',   'Retaliation Aegis','shield blocks detonate a huge thorn burst'],
+  ['lifesteal', 'cull', 'soulharvest',   'Soul Harvest',     'executions heal 2% of your max HP'],
+  ['crit', 'graze',     'bulletwaltz',   'Bullet Waltz',     '+10% crit chance while graze-heat is hot'],
+  ['speed', 'shrink',   'phantomneedle', 'Phantom Needle',   'your hitbox shrinks another 15%'],
+  ['nova', 'frost',     'icering',       'Ice Ring',         'nova rings always chill what they touch'],
+];
+const SYNERGIES = {};
+for (const [a, b, slug, name, desc] of SYNERGIES_RAW) {
+  const ia = FAMILY_KEYS.indexOf(a), ib = FAMILY_KEYS.indexOf(b);
+  const key = ia <= ib ? a + '|' + b : b + '|' + a;
+  SYNERGIES[key] = { slug, name, desc };
+}
+
+function pairSynergy(a, b) {
+  const ia = FAMILY_KEYS.indexOf(a), ib = FAMILY_KEYS.indexOf(b);
+  return SYNERGIES[ia <= ib ? a + '|' + b : b + '|' + a] || null;
+}
+
+// All synergies active inside one fusion unit's family tree.
+function synergiesOfUnit(unit) {
+  if (unit.kind !== 'fusion') return [];
+  const fams = [];
+  walkUnit(unit, (key) => { if (!fams.includes(key)) fams.push(key); });
+  const out = [];
+  for (let i = 0; i < fams.length; i++) {
+    for (let j = i + 1; j < fams.length; j++) {
+      const syn = pairSynergy(fams[i], fams[j]);
+      if (syn && !out.includes(syn)) out.push(syn);
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Fusion tiers
 // ---------------------------------------------------------------------------
 const TIERS = [
@@ -293,6 +343,7 @@ function unitSummary(unit) {
     `${FAMILIES[key].name} ${lv >= 10 ? String(Math.round(lv)) : lv.toFixed(1).replace(/\.0$/, '')}`);
   const specials = [];
   walkSpecials(unit, (sp) => specials.push(sp.label));
+  for (const syn of synergiesOfUnit(unit)) specials.push('SYNERGY ' + syn.name + ' — ' + syn.desc);
   return { effects: lines, specials };
 }
 

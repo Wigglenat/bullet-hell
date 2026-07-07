@@ -33,6 +33,34 @@ two Transcendent at Lv 2+    →  MYTHIC        "OUROBOROS — Colossal Barrage"
 two Mythics                  →  ★ OVERCHARGE  everything ×1.5, stacks forever
 ```
 
+## ⚡ Synergies — Isaac-style combination effects
+
+Fusions don't just add stats — like *The Binding of Isaac*, the **right pair
+changes how your weapon behaves**. The moment a fusion contains both halves of
+a known pair anywhere in its family tree, a **⚡ SYNERGY banner** announces the
+discovery, the effect switches on run-wide, and your bullets **visibly tint**
+toward your elements (fire = orange, frost = ice-blue, arc = gold…). The pause
+screen lists every active synergy.
+
+| Pair | Synergy | New behavior |
+|---|---|---|
+| Fire Rounds + Splash Rounds | **Napalm** | splash hits leave burning ground pools |
+| Splash Rounds + Frost Shot | **Cryo Shatter** | splash damage also chills everything it touches |
+| Frost Shot + Executioner | **Shatterpoint** | chilled enemies are executed at DOUBLE the cull threshold |
+| Pierce + Chain Arc | **Rail Storm** | chain lightning jumps 2 extra times |
+| Chase + Chain Arc | **Storm Seekers** | +15% arc chance |
+| Bounce + Explosive Rounds | **Blast Ricochet** | bullets detonate on every wall bounce |
+| Split + Missiles | **Cluster Warheads** | missile explosions release homing shards |
+| Drones + Laser | **Beam Drones** | your drones fire mini-beams alongside your laser |
+| Fire Rounds + Orbitals | **Flame Wheel** | orbital blades set enemies on fire |
+| Missiles + Turret | **Missile Battery** | turret shots explode on impact |
+| Impact + Ram | **Battering Ram** | ramming blasts everything around you backwards |
+| Shield + Thorns | **Retaliation Aegis** | shield blocks detonate a huge thorn burst |
+| Lifesteal + Executioner | **Soul Harvest** | executions heal 2% of your max HP |
+| Critical + Graze | **Bullet Waltz** | +10% crit chance while graze-heat is hot |
+| Speed + Shrink | **Phantom Needle** | your hitbox shrinks another 15% |
+| Nova + Frost Shot | **Ice Ring** | nova rings always chill what they touch |
+
 ## Named elites
 
 Gold-ringed, personally named horrors — **VORAX THE HUNGERING**, **NYXA
