@@ -176,11 +176,13 @@ let state = ST.TITLE;
 
 const store = (() => { try { const s = window.localStorage; s.getItem('x'); return s; } catch (e) { return null; } })();
 let bestWave = +((store && (store.getItem('spacesouls.bestWave') || store.getItem('myriad.bestWave'))) || 0);
+let bestScore = +((store && store.getItem('spacesouls.bestScore')) || 0);
 
 const G = {};
 function newRun() {
   Object.assign(G, {
     time: 0, wave: 1, waveT: 0, sector: 1, spoilsQueue: [], ngPlus: 0, kills: 0, fusions: 0, dmgDealt: 0,
+    score: 0, dpsLast: 0, dpsT: 0, dpsVal: 0,
     level: 1, xp: 0, xpNeed: xpNeed(1), pendingLevels: 0,
     px: W / 2, py: H * 0.7, pr: 3.5, hp: 100, iT: 0, focus: false,
     faceX: 0, faceY: -1, shake: 0, phoenixUsed: false,
@@ -203,7 +205,9 @@ function newRun() {
 }
 function xpNeed(lv) { return Math.floor(5 + lv * 3 + lv * lv * 0.2); }
 function checkLevel() {
-  while (G.xp >= G.xpNeed) { G.xp -= G.xpNeed; G.level++; G.xpNeed = xpNeed(G.level); G.pendingLevels++; }
+  let leveled = false;
+  while (G.xp >= G.xpNeed) { G.xp -= G.xpNeed; G.level++; G.xpNeed = xpNeed(G.level); G.pendingLevels++; leveled = true; }
+  if (leveled && G.stats) recompute(); // inherent per-level damage growth kicks in immediately
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +232,7 @@ function recompute() {
     graze: 0, grazeR: 0, grazeHeat: 0, ram: 0,
   };
   s.dmg *= 1 + 0.04 * G.ess.dmg;
+  s.dmg *= 1 + 0.015 * Math.max(0, (G.level || 1) - 1); // every level-up grows damage
   s.rate *= 1 + 0.03 * G.ess.rate;
   s.maxHp += 10 * G.ess.life;
 
@@ -279,7 +284,7 @@ function recompute() {
                         s.turretCd = Math.max(3, 6 - 0.3 * L); break;
       case 'vortex':    s.vortex += L; s.vortexCd = Math.max(3.5, 7 - 0.3 * L); break;
       case 'graze':     s.graze += L; s.grazeR = Math.min(64, 30 + 2.5 * L);
-                        s.grazeHeat = Math.min(0.35, 0.02 * L + s.grazeHeat); break;
+                        s.grazeHeat = Math.min(0.5, 0.05 * L + s.grazeHeat); break;
       case 'ram':       s.ram += 0.35 * L; break;
     }
   });
@@ -760,6 +765,7 @@ function killEnemy(en) {
   if (en.dead) return;
   en.dead = true; en.hp = -1e9;
   G.kills++;
+  G.score += Math.round(en.xp * 10 * (1 + totalWave() * 0.03) * (1 + (G.ngPlus || 0)));
   SFX.kill();
   burst(en.x, en.y, en.color, en.boss ? 50 : 6, en.boss ? 380 : 150);
   const s = G.stats;
@@ -1711,6 +1717,12 @@ function update(dt) {
     }
     G.healAcc = 0;
   }
+  G.dpsT += dt;
+  if (G.dpsT >= 0.5) {
+    G.dpsVal = (G.dmgDealt - G.dpsLast) / G.dpsT;
+    G.dpsLast = G.dmgDealt;
+    G.dpsT = 0;
+  }
   G.xpT += dt;
   if (G.xpT >= 0.8) {
     G.xpT = 0;
@@ -2032,6 +2044,8 @@ function updateHUD() {
   $('lvNum').textContent = G.level;
   $('waveNum').textContent = (G.ngPlus ? 'NG+' + G.ngPlus + ' ' : '') + G.sector + '-' + G.wave;
   $('killNum').textContent = fmt(G.kills);
+  $('scoreNum').textContent = fmtShort(G.score);
+  $('dpsNum').textContent = fmtShort(G.dpsVal);
   $('bestNum').textContent = Math.max(bestWave, totalWave());
   $('shieldNum').textContent = s.shieldMax > 0 ? `🛡 ${G.shield}/${s.shieldMax}` : '';
   if (G.bossAlive) $('bossBar').querySelector('i').style.width = clamp(G.bossAlive.hp / G.bossAlive.maxHp * 100, 0, 100) + '%';
@@ -2093,10 +2107,15 @@ function die() {
   state = ST.DEAD;
   document.getElementById('bossBar').classList.remove('on');
   bestWave = Math.max(bestWave, (G.ngPlus || 0) * 100000 + totalWave());
-  if (store) try { store.setItem('spacesouls.bestWave', String(bestWave)); } catch (e) {}
+  bestScore = Math.max(bestScore, G.score);
+  if (store) try {
+    store.setItem('spacesouls.bestWave', String(bestWave));
+    store.setItem('spacesouls.bestScore', String(bestScore));
+  } catch (e) {}
   $('deadStats').innerHTML = `
     <div class="sub">Survived to <b>${G.ngPlus ? 'NG+' + G.ngPlus + ' · ' : ''}Sector ${G.sector} · Wave ${G.wave}</b> (best: ${bestWave} total waves) · <b>${fmt(G.kills)}</b> kills ·
-    Level <b>${G.level}</b> · <b>${G.fusions}</b> auto-fusions · ${fmt(Math.round(G.dmgDealt))} damage dealt</div>
+    Level <b>${G.level}</b> · <b>${G.fusions}</b> auto-fusions · ${fmt(Math.round(G.dmgDealt))} damage dealt<br>
+    SCORE <b>${fmt(G.score)}</b> (best: ${fmt(bestScore)})</div>
     ${buildRecapHTML()}`;
   $('ovDead').classList.add('on');
 }
@@ -2190,6 +2209,7 @@ window.__GAME__ = {
   forceLevelUp() { G.pendingLevels++; },
   hurt(d) { hurtPlayer(d); },
   fireVolley, spawnElite, startSuperBoss, totalWave, wardenTier, WARDEN_TIERS, ETYPES, waveScale, maxShooters, shooterCount,
+  hitEnemy,
   kill(en) { killEnemy(en); },
   get world() { return { W, H, zoom: ZOOM }; },
   unitSummary, autoFuse, makeFamilyUnit,
