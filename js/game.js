@@ -15,12 +15,18 @@
 // ---------------------------------------------------------------------------
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
-let W = 0, H = 0;
+const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+// Zoomed-out camera: the world is bigger than the window and rendered scaled
+// down — more room to weave. Phones zoom out less so bullets stay readable.
+const ZOOM = IS_TOUCH ? 0.8 : 0.7;
+let W = 0, H = 0, dprCur = 1;
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  W = window.innerWidth; H = window.innerHeight;
-  cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  dprCur = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.round(window.innerWidth / ZOOM);
+  H = Math.round(window.innerHeight / ZOOM);
+  cv.width = Math.floor(window.innerWidth * dprCur);
+  cv.height = Math.floor(window.innerHeight * dprCur);
+  ctx.setTransform(dprCur * ZOOM, 0, 0, dprCur * ZOOM, 0, 0);
 }
 window.addEventListener('resize', resize); resize();
 
@@ -80,6 +86,17 @@ function gemSprite() {
     g.closePath(); g.fill();
   });
 }
+function healSprite() {
+  return glowSprite('hl', 7, (g, R) => {
+    const grad = g.createRadialGradient(R, R, 0, R, R, R);
+    grad.addColorStop(0, 'rgba(255,180,200,.95)');
+    grad.addColorStop(1, 'rgba(255,90,130,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, R * 2, R * 2);
+    g.fillStyle = '#ff5f7d';
+    g.fillRect(R - 1.5, R - 5, 3, 10); // little plus sign
+    g.fillRect(R - 5, R - 1.5, 10, 3);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Tiny synth
@@ -124,8 +141,8 @@ window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 // ---------------------------------------------------------------------------
 // Touch input — floating analog joystick: drag anywhere on the battlefield.
 // Full drag = full speed; a light drag moves slowly (mobile "focus" mode).
+// Joystick math and drawing live in SCREEN pixels, independent of the zoom.
 // ---------------------------------------------------------------------------
-const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 const joy = { active: false, id: -1, sx: 0, sy: 0, x: 0, y: 0, R: 64 };
 if (IS_TOUCH) document.body.classList.add('touch');
 
@@ -169,7 +186,7 @@ function newRun() {
     units: [], ess: { dmg: 0, rate: 0, life: 0 },
     stats: null, shield: 0, shieldT: 0,
     gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18, bombT: 0,
-    rippleActive: 0, bladeCd: [], rampStart: null, rampMult: 1, pulseT: 0, rebirthT: 0,
+    rippleActive: 0, bladeCd: [], rampStart: null, rampMult: 1, pulseT: 0, rebirthT: 0, adrenT: 0,
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
     spawnT: 1.0, bossAlive: null, bannerQ: [], bannerT: 0,
   });
@@ -195,6 +212,8 @@ function recompute() {
     echo: false, ripple: false, guardian: false, phoenix: false, barrage: false,
     allMult: 1, critMult: 2.5, ramp: 0, pulse: 0, rebirth: false, barrageCd: 18,
     shardHoming: false,
+    rear: 0, side: 0, arc: 0, cull: 0, thorns: 0, armor: 0, dodge: 0,
+    scav: 0, xpMult: 1, adren: 0, hitR: 3.5,
   };
   s.dmg *= 1 + 0.04 * G.ess.dmg;
   s.rate *= 1 + 0.03 * G.ess.rate;
@@ -225,6 +244,18 @@ function recompute() {
                         s.slowBullet = Math.min(0.6, Math.max(s.slowBullet, 0.10 + 0.035 * L)); break;
       case 'bomb':      s.bombR = Math.max(s.bombR, 120 + 14 * L);
                         s.bombCd = s.bombCd ? Math.min(s.bombCd, Math.max(6, 20 - 1.6 * L)) : Math.max(6, 20 - 1.6 * L); break;
+      case 'rear':      s.rear += Math.round(L); break;
+      case 'side':      s.side += Math.round(L); break;
+      case 'arc':       s.arc = Math.min(0.65, s.arc + 0.08 * L); break;
+      case 'cull':      s.cull = Math.min(0.32, Math.max(s.cull, 0.06 + 0.02 * L)); break;
+      case 'velocity':  s.speed *= 1 + 0.12 * Math.min(L, 10); s.dmg *= 1 + 0.06 * L; break;
+      case 'thorns':    s.thorns += L; break;
+      case 'armor':     s.armor += 1.5 * L; break;
+      case 'dodge':     s.dodge = Math.min(0.5, s.dodge + 0.04 * L); break;
+      case 'scavenger': s.scav = Math.min(0.55, s.scav + 0.05 * L); break;
+      case 'greed':     s.xpMult += 0.10 * L; break;
+      case 'adrenaline':s.adren = Math.max(s.adren, 3 + 0.5 * L); break;
+      case 'shrink':    s.hitR = Math.min(s.hitR, Math.max(1.6, 3.5 * (1 - 0.06 * Math.min(L, 9)))); break;
     }
   });
   for (const u of G.units) walkSpecials(u, (sp) => {
@@ -536,17 +567,28 @@ function aimAngle() {
   return Math.atan2(G.faceY, G.faceX);
 }
 
-function fireVolley() {
-  const s = G.stats, n = s.count;
-  const a0 = aimAngle();
+function fireFan(a0, n, dmgMult) {
+  const s = G.stats;
   const spread = Math.min(0.55, 0.085 * (n - 1));
   for (let i = 0; i < n; i++) {
     const a = n === 1 ? a0 : a0 - spread / 2 + spread * (i / (n - 1));
     poolPush(G.pB, CAP.pB, {
       x: G.px, y: G.py, vx: Math.cos(a) * s.speed, vy: Math.sin(a) * s.speed,
-      t: 0, life: 1.5 + s.bounce * 0.5, size: s.size, dmg: s.dmg,
+      t: 0, life: 1.5 + s.bounce * 0.5, size: s.size, dmg: s.dmg * dmgMult,
       pierce: s.pierce, bounce: s.bounce, homing: s.homing, hit: null,
     });
+  }
+}
+
+function fireVolley() {
+  const s = G.stats;
+  const a0 = aimAngle();
+  fireFan(a0, s.count, 1);
+  if (s.rear > 0) fireFan(a0 + Math.PI, Math.min(s.rear, s.count), 0.7);        // Rear Guard
+  if (s.side > 0) {                                                             // Side Cannons
+    const nSide = Math.min(s.side, 8);
+    fireFan(a0 + Math.PI / 2, nSide, 0.6);
+    fireFan(a0 - Math.PI / 2, nSide, 0.6);
   }
 }
 
@@ -595,7 +637,7 @@ function bomb(x, y, r, dmg) {
 // ---------------------------------------------------------------------------
 // Damage
 // ---------------------------------------------------------------------------
-function hitEnemy(en, dmg) {
+function hitEnemy(en, dmg, noArc) {
   const s = G.stats;
   const isCrit = Math.random() < s.crit;
   const d = dmg * (isCrit ? s.critMult : 1) * (G.rampMult || 1);
@@ -604,6 +646,21 @@ function hitEnemy(en, dmg) {
   G.dmgDealt += d;
   if (s.lifesteal > 0) G.hp = Math.min(s.maxHp, G.hp + d * s.lifesteal);
   if (isCrit) burst(en.x, en.y, '#ffd24a', 3, 150);
+  // Chain Arc — lightning jumps to the nearest other enemy
+  if (!noArc && s.arc > 0 && Math.random() < s.arc) {
+    nearEnemies(en.x, en.y, 180, _near);
+    let best = null, bd = 180 * 180;
+    for (const o of _near) { if (o === en || o.hp <= 0) continue; const q = dist2(en.x, en.y, o.x, o.y); if (q < bd) { bd = q; best = o; } }
+    if (best) {
+      G.beams.push({ x: en.x, y: en.y, a: Math.atan2(best.y - en.y, best.x - en.x), len: Math.sqrt(bd), w: 2, color: '#ffe94a', t: 0, life: 0.1 });
+      hitEnemy(best, dmg * 0.6, true);
+    }
+  }
+  // Executioner — finish weakened non-boss enemies
+  if (s.cull > 0 && !en.boss && en.hp > 0 && en.hp < en.maxHp * s.cull) {
+    en.hp = 0;
+    burst(en.x, en.y, '#ff2a5a', 5, 160);
+  }
   if (en.hp <= 0) killEnemy(en);
   return d;
 }
@@ -627,6 +684,9 @@ function killEnemy(en) {
   }
   if (s.sparks) blast(en.x, en.y, 46, s.dmg * 0.5);
   if (s.kilnova > 0 && Math.random() < s.kilnova) blast(en.x, en.y, 90, s.dmg * 1.2);
+  if (s.scav > 0 && Math.random() < s.scav) {
+    poolPush(G.gems, CAP.gems, { x: en.x, y: en.y, v: 0, heal: 7, t: 0 }); // Scavenger orb
+  }
   if (en.boss) {
     G.bossAlive = null;
     document.getElementById('bossBar').classList.remove('on');
@@ -643,7 +703,7 @@ function killEnemy(en) {
 
 function blast(x, y, r, dmg) {
   nearEnemies(x, y, r, _near);
-  for (const en of _near) if (en.hp > 0 && dist2(x, y, en.x, en.y) < (r + en.r) * (r + en.r)) hitEnemy(en, dmg);
+  for (const en of _near) if (en.hp > 0 && dist2(x, y, en.x, en.y) < (r + en.r) * (r + en.r)) hitEnemy(en, dmg, true);
   burst(x, y, '#ffb454', 6, 180);
 }
 
@@ -816,6 +876,13 @@ function updateEnemy(en, dt) {
 function hurtPlayer(dmg) {
   if (G.iT > 0) return;
   const s = G.stats;
+  if (s.dodge > 0 && Math.random() < s.dodge) { // Evasion — the hit never happened
+    G.iT = 0.2;
+    burst(G.px, G.py, '#baffc8', 6, 160);
+    return;
+  }
+  if (s.thorns > 0) blast(G.px, G.py, 90, s.dmg * (0.4 + 0.2 * s.thorns)); // Thorns
+  if (s.adren > 0) G.adrenT = s.adren;                                     // Adrenaline
   if (G.shield > 0) {
     G.shield--;
     G.iT = 0.6;
@@ -827,6 +894,7 @@ function hurtPlayer(dmg) {
     if (s.guardian) blast(G.px, G.py, 160, s.dmg * 2.5);
     return;
   }
+  dmg = Math.max(1, dmg - s.armor); // Armor — flat reduction
   G.hp -= dmg;
   G.iT = s.ghostT;
   G.shake = Math.max(G.shake, 7);
@@ -903,8 +971,9 @@ function update(dt) {
     if (en === G.bossAlive) { G.bossAlive = null; document.getElementById('bossBar').classList.remove('on'); }
   }
 
-  // main gun
-  G.gunAcc += dt * s.rate;
+  // main gun (Adrenaline rush: +50% rate after taking a hit)
+  if (G.adrenT > 0) G.adrenT -= dt;
+  G.gunAcc += dt * s.rate * (G.adrenT > 0 ? 1.5 : 1);
   let guard = 0;
   while (G.gunAcc >= 1 && guard++ < 6) { G.gunAcc -= 1; fireVolley(); }
   if (G.gunAcc > 6) G.gunAcc = 6;
@@ -1016,7 +1085,7 @@ function update(dt) {
     if (s.slowR > 0 && dist2(b.x, b.y, G.px, G.py) < s.slowR * s.slowR) m *= 1 - s.slowBullet;
     b.x += b.vx * dt * m; b.y += b.vy * dt * m;
     let dead = b.t >= b.life || b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30;
-    if (!dead && G.iT <= 0 && dist2(b.x, b.y, G.px, G.py) < (b.size + G.pr) * (b.size + G.pr)) {
+    if (!dead && G.iT <= 0 && dist2(b.x, b.y, G.px, G.py) < (b.size + s.hitR) * (b.size + s.hitR)) {
       hurtPlayer(b.dmg); dead = true;
     }
     if (dead) { G.eB[i] = G.eB[G.eB.length - 1]; G.eB.pop(); }
@@ -1033,7 +1102,8 @@ function update(dt) {
       g.x += (G.px - g.x) / d * 480 * dt; g.y += (G.py - g.y) / d * 480 * dt;
     }
     if (d2 < 20 * 20) {
-      G.xp += g.v;
+      if (g.heal) G.hp = Math.min(s.maxHp, G.hp + g.heal); // Scavenger healing orb
+      else G.xp += g.v * s.xpMult;                          // Greed multiplies gem value
       if (s.gemHeal > 0) G.hp = Math.min(s.maxHp, G.hp + s.gemHeal);
       SFX.gem();
       G.gems.splice(i, 1);
@@ -1111,9 +1181,12 @@ function render() {
     ctx.globalAlpha = 1;
   }
 
-  // gems
-  const gspr = gemSprite();
-  for (const g of G.gems) ctx.drawImage(gspr.c, g.x - gspr.R, g.y - gspr.R);
+  // gems + healing orbs
+  const gspr = gemSprite(), hspr = healSprite();
+  for (const g of G.gems) {
+    const spr = g.heal ? hspr : gspr;
+    ctx.drawImage(spr.c, g.x - spr.R, g.y - spr.R);
+  }
 
   // player bullets (quiet cyan)
   for (const b of G.pB) {
@@ -1200,19 +1273,20 @@ function render() {
       ctx.rotate(Math.atan2(G.faceY, G.faceX) + Math.PI / 2);
       ctx.shadowColor = '#8ad8ff'; ctx.shadowBlur = 14;
       ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#6fd8ff'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(9, 10); ctx.lineTo(0, 5); ctx.lineTo(-9, 10); ctx.closePath();
+      ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(10, 11); ctx.lineTo(0, 6); ctx.lineTo(-10, 11); ctx.closePath();
       ctx.fill(); ctx.stroke();
       ctx.shadowBlur = 0;
       ctx.restore();
     }
-    // hitbox — faint always, bright in focus
+    // hitbox — faint always, bright in focus (Shrink makes it truly smaller)
+    const hr = s ? s.hitR : G.pr;
     ctx.fillStyle = '#ff2a5a';
     ctx.globalAlpha = G.focus ? 1 : 0.55;
-    ctx.beginPath(); ctx.arc(G.px, G.py, G.pr, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(G.px, G.py, hr, 0, TAU); ctx.fill();
     ctx.globalAlpha = 1;
     if (G.focus) {
       ctx.strokeStyle = 'rgba(255,255,255,.8)';
-      ctx.beginPath(); ctx.arc(G.px, G.py, G.pr + 3, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.arc(G.px, G.py, hr + 3, 0, TAU); ctx.stroke();
     }
   }
 
@@ -1242,8 +1316,10 @@ function render() {
 
   ctx.restore();
 
-  // touch joystick (screen space, unaffected by shake)
+  // touch joystick (true screen space — unaffected by zoom or shake)
   if (joy.active) {
+    ctx.save();
+    ctx.setTransform(dprCur, 0, 0, dprCur, 0, 0);
     ctx.strokeStyle = 'rgba(140, 180, 255, .35)';
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(joy.sx, joy.sy, joy.R, 0, TAU); ctx.stroke();
@@ -1251,7 +1327,7 @@ function render() {
     const k = Math.min(jd, joy.R);
     ctx.fillStyle = 'rgba(180, 210, 255, .5)';
     ctx.beginPath(); ctx.arc(joy.sx + jdx / jd * k, joy.sy + jdy / jd * k, 17, 0, TAU); ctx.fill();
-    ctx.lineWidth = 1;
+    ctx.restore();
   }
 
   // faint vignette only
@@ -1317,7 +1393,12 @@ function buildRecapHTML() {
     (s.pierce ? ` · pierce ${s.pierce}` : '') + (s.bounce ? ` · bounce ${s.bounce}` : '') +
     (s.homing ? ' · homing' : '') + (s.crit > 0.04 ? ` · crit ${Math.round(s.crit * 100)}%` : '') +
     (s.lifesteal ? ` · lifesteal ${Math.round(s.lifesteal * 100)}%` : '') +
-    (s.shieldMax ? ` · shield ${s.shieldMax}` : '') + (s.regen ? ` · regen ${s.regen.toFixed(1)}/s` : '');
+    (s.shieldMax ? ` · shield ${s.shieldMax}` : '') + (s.regen ? ` · regen ${s.regen.toFixed(1)}/s` : '') +
+    (s.armor ? ` · armor ${s.armor}` : '') + (s.dodge ? ` · dodge ${Math.round(s.dodge * 100)}%` : '') +
+    (s.rear ? ` · rear ${s.rear}` : '') + (s.side ? ` · side ${s.side}×2` : '') +
+    (s.arc ? ` · arc ${Math.round(s.arc * 100)}%` : '') + (s.cull ? ` · cull <${Math.round(s.cull * 100)}%` : '') +
+    (s.xpMult > 1 ? ` · xp +${Math.round((s.xpMult - 1) * 100)}%` : '') +
+    (s.hitR < 3.5 ? ` · hitbox −${Math.round((1 - s.hitR / 3.5) * 100)}%` : '');
   return `<div style="text-align:left;max-width:520px;margin:0 auto">${rows || '<i>nothing yet</i>'}</div>
     <div style="margin-top:10px;color:var(--ink);font-size:13px">${totals}</div>`;
 }
@@ -1421,5 +1502,7 @@ window.__GAME__ = {
   levelUnit(i, n) { const u = G.units[i]; for (let k = 0; k < (n || 1); k++) applyCard({ type: 'level', u }); return u; },
   forceLevelUp() { G.pendingLevels++; },
   hurt(d) { hurtPlayer(d); },
+  fireVolley,
+  get world() { return { W, H, zoom: ZOOM }; },
   unitSummary, autoFuse, makeFamilyUnit,
 };

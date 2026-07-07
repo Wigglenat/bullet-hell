@@ -9,11 +9,12 @@ no build step, no dependencies.
 ## How it plays
 
 Your ship fires by itself — you **dodge**, collect XP gems, and pick upgrades.
-Every level-up offers 3 cards from the 20 classics:
+The arena is zoomed out for real maneuvering room. Every level-up offers 3
+cards from the 32 classics:
 
 | Attack | Defense | Utility |
 |---|---|---|
-| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser | Lifesteal, Shield, Vitality, Regen, Ghost | Speed, Magnetic, Slow Field, Bomb |
+| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger | Speed, Magnetic, Slow Field, Bomb, Greed, Adrenaline, Shrink |
 
 Every card says exactly what it does ("+1 bullet", "+3% lifesteal", "+1 shield
 charge"). Picking the same family again levels it up.
