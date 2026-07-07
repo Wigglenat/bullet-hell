@@ -140,7 +140,7 @@ function newRun() {
     units: [], ess: { dmg: 0, rate: 0, life: 0 },
     stats: null, shield: 0, shieldT: 0,
     gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18, bombT: 0,
-    rippleActive: 0, bladeCd: [],
+    rippleActive: 0, bladeCd: [], rampStart: null, rampMult: 1, pulseT: 0, rebirthT: 0,
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
     spawnT: 1.0, bossAlive: null, bannerQ: [], bannerT: 0,
   });
@@ -164,7 +164,8 @@ function recompute() {
     bombR: 0, bombCd: 0, novaLv: 0, novaCd: 0, laserLv: 0, laserCd: 0,
     orbitals: 0, grazeSlow: 0, gemHeal: 0, sparks: false, kilnova: 0,
     echo: false, ripple: false, guardian: false, phoenix: false, barrage: false,
-    allMult: 1,
+    allMult: 1, critMult: 2.5, ramp: 0, pulse: 0, rebirth: false, barrageCd: 18,
+    shardHoming: false,
   };
   s.dmg *= 1 + 0.04 * G.ess.dmg;
   s.rate *= 1 + 0.03 * G.ess.rate;
@@ -236,6 +237,51 @@ function recompute() {
   s.novaCd = s.novaLv > 0 ? Math.max(2.2, 6 - 0.4 * s.novaLv) : 0;
   s.laserCd = s.laserLv > 0 ? Math.max(2.2, 7 - 0.5 * s.laserLv) : 0;
 
+  // PRIMORDIAL relics — applied last, deliberately beyond the normal caps
+  for (const u of G.units) {
+    if (u.kind !== 'primordial') continue;
+    const k = unitAmp(u); // 1 + 0.25 per level
+    switch (u.key) {
+      case 'genesis':
+        s.dmg *= 1 + 1.0 * k;
+        s.rate = Math.min(20, s.rate * (1 + 0.5 * k));
+        s.count = Math.min(32, s.count + Math.round(4 * k));
+        s.ramp += 0.01 * k;
+        break;
+      case 'worldheart':
+        s.maxHp += Math.round(300 * k);
+        s.regen += 10 * k;
+        s.lifesteal = Math.min(0.6, s.lifesteal + 0.25);
+        s.rebirth = true;
+        break;
+      case 'horizon':
+        s.slowR = Math.max(s.slowR, 480);
+        s.slowEnemy = Math.max(s.slowEnemy, 0.6);
+        s.slowBullet = Math.max(s.slowBullet, 0.6);
+        s.pulse = 10;
+        break;
+      case 'firstlight':
+        s.laserLv += 8 * k;
+        s.laserCd = 1.5;
+        s.crit += 0.5;
+        s.critMult = 4;
+        break;
+      case 'swarm':
+        s.orbitals = Math.min(20, s.orbitals + 8);
+        s.splitShards = Math.min(20, s.splitShards + 6);
+        s.shardHoming = true;
+        break;
+      case 'omega':
+        s.barrage = true;
+        s.barrageCd = Math.max(6, 12 / k);
+        s.shieldMax += 3;
+        s.shieldRegen *= 0.5;
+        s.bombR = Math.max(s.bombR, 220);
+        s.bombCd = Math.min(s.bombCd || 6, 2);
+        break;
+    }
+  }
+
   const oldMax = G.stats ? G.stats.maxHp : s.maxHp;
   G.stats = s;
   if (s.maxHp > oldMax) G.hp = Math.min(s.maxHp, G.hp + (s.maxHp - oldMax)); // growing maxHp heals the difference
@@ -259,6 +305,16 @@ function applyCard(card) {
   } else if (card.type === 'ess') {
     G.ess[card.key]++;
     if (card.key === 'life') G.hp = Math.min((G.stats ? G.stats.maxHp : 100) + 10, G.hp + 40);
+  } else if (card.type === 'primordial') {
+    G.units.push(makePrimordialUnit(card.key));
+    if (card.key === 'genesis' && G.rampStart === null) G.rampStart = G.time;
+    G.bannerQ.push({
+      title: '🜏 PRIMORDIAL — ' + PRIMORDIALS[card.key].name,
+      subtitle: PRIMORDIALS[card.key].desc,
+    });
+    if (G.bannerQ.length > 6) G.bannerQ.shift();
+    G.shake = Math.max(G.shake, 10);
+    SFX.mythic();
   }
   // automatic fusions — may ladder (Fused → Ascended → …), one banner each
   let f;
@@ -282,9 +338,9 @@ function announce(txt, color) {
 function cardPool() {
   const pool = [];
   for (const u of G.units) {
-    if (u.level < TIERS[u.tier].maxLevel) pool.push({ type: 'level', u, w: 3 });
+    if (u.level < TIERS[u.tier].maxLevel) pool.push({ type: 'level', u, w: u.kind === 'primordial' ? 1 : 3 });
   }
-  if (G.units.length < MAX_UNITS) {
+  if (G.units.filter(u => u.kind !== 'primordial').length < MAX_UNITS) { // relics don't take slots
     for (const key of FAMILY_KEYS) {
       if (!G.units.some(u => u.kind === 'family' && u.key === key)) pool.push({ type: 'new', key, w: 3 });
     }
@@ -312,6 +368,13 @@ const ESS_INFO = {
 };
 
 function cardHTML(card) {
+  if (card.type === 'primordial') {
+    const P = PRIMORDIALS[card.key], T = TIERS[6];
+    return { border: T.color, cls: 'cardPrimordial', html: `
+      <span class="tierTag" style="border-color:${T.color};color:${T.color}">${T.jp} PRIMORDIAL · 1 in 10,000</span>
+      <h3>🜏 ${P.name}</h3>
+      <div class="desc">${P.desc}</div>` };
+  }
   if (card.type === 'new') {
     const F = FAMILIES[card.key], C = CATS[F.cat];
     return { border: C.color, html: `
@@ -321,6 +384,13 @@ function cardHTML(card) {
   }
   if (card.type === 'level') {
     const u = card.u;
+    if (u.kind === 'primordial') {
+      const P = PRIMORDIALS[u.key], T = TIERS[6];
+      return { border: T.color, cls: 'cardPrimordial', html: `
+        <span class="tierTag" style="border-color:${T.color};color:${T.color}">${T.jp} Primordial · Lv ${u.level} → ${u.level + 1}</span>
+        <h3>🜏 ${P.name}</h3>
+        <div class="desc">${P.desc}<br><b style="color:${T.color}">Next: all of it, +25% stronger</b></div>` };
+    }
     if (u.kind === 'family') {
       const F = FAMILIES[u.key], C = CATS[F.cat];
       return { border: C.color, html: `
@@ -348,10 +418,21 @@ function openLevelUp() {
   SFX.level();
   const wrap = document.getElementById('cards');
   wrap.innerHTML = '';
-  for (const card of drawCards(3)) {
+  const cards = drawCards(3);
+  // PRIMORDIAL roll — each slot has a 0.01% chance (1 in 10,000)
+  for (let i = 0; i < cards.length; i++) {
+    if (Math.random() >= PRIMORDIAL_CHANCE) continue;
+    const unowned = PRIMORDIAL_KEYS.filter(k => !G.units.some(u => u.kind === 'primordial' && u.key === k));
+    if (unowned.length) cards[i] = { type: 'primordial', key: unowned[(Math.random() * unowned.length) | 0] };
+    else {
+      const owned = G.units.filter(u => u.kind === 'primordial');
+      cards[i] = { type: 'level', u: owned[(Math.random() * owned.length) | 0] };
+    }
+  }
+  for (const card of cards) {
     const info = cardHTML(card);
     const el = document.createElement('div');
-    el.className = 'card';
+    el.className = 'card' + (info.cls ? ' ' + info.cls : '');
     el.style.borderColor = info.border;
     el.innerHTML = info.html;
     el.addEventListener('click', () => {
@@ -488,7 +569,7 @@ function bomb(x, y, r, dmg) {
 function hitEnemy(en, dmg) {
   const s = G.stats;
   const isCrit = Math.random() < s.crit;
-  const d = dmg * (isCrit ? 2.5 : 1);
+  const d = dmg * (isCrit ? s.critMult : 1) * (G.rampMult || 1);
   en.hp -= d;
   en.flash = 0.08;
   G.dmgDealt += d;
@@ -512,7 +593,7 @@ function killEnemy(en) {
   if (s.splitShards > 0) {
     for (let k = 0; k < s.splitShards; k++) {
       const a = Math.random() * TAU;
-      poolPush(G.pB, CAP.pB, { x: en.x, y: en.y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, t: 0, life: 0.55, size: 3.5, dmg: s.dmg * 0.4, pierce: 0, bounce: 0, homing: 0, hit: null });
+      poolPush(G.pB, CAP.pB, { x: en.x, y: en.y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, t: 0, life: s.shardHoming ? 1.1 : 0.55, size: 3.5, dmg: s.dmg * 0.4, pierce: 0, bounce: 0, homing: s.shardHoming ? 3.5 : 0, hit: null });
     }
   }
   if (s.sparks) blast(en.x, en.y, 46, s.dmg * 0.5);
@@ -724,6 +805,14 @@ function hurtPlayer(dmg) {
   burst(G.px, G.py, '#ff3a6b', 12, 220);
   if (s.bombR > 0 && G.bombT <= 0) { G.bombT = s.bombCd; bomb(G.px, G.py, s.bombR, s.dmg * 2); }
   if (G.hp <= 0) {
+    if (s.rebirth && G.rebirthT <= 0) { // WORLDHEART — full resurrection on cooldown
+      G.rebirthT = 90;
+      G.hp = s.maxHp; G.iT = 3;
+      G.eB.length = 0;
+      burst(G.px, G.py, '#ff5f6d', 80, 440);
+      announce('WORLDHEART — REBIRTH', '#ff5f6d');
+      return;
+    }
     if (s.phoenix && !G.phoenixUsed) {
       G.phoenixUsed = true;
       G.hp = s.maxHp * 0.5; G.iT = 2.5;
@@ -743,6 +832,9 @@ function hurtPlayer(dmg) {
 function update(dt) {
   G.time += dt;
   const s = G.stats;
+  // GENESIS ENGINE ramp — +1%/s (per level) since the relic was acquired
+  G.rampMult = s.ramp > 0 && G.rampStart !== null ? 1 + s.ramp * Math.max(0, G.time - G.rampStart) : 1;
+  if (G.rebirthT > 0) G.rebirthT -= dt;
 
   // movement
   const up = keys.has('w') || keys.has('arrowup'), dn = keys.has('s') || keys.has('arrowdown');
@@ -782,10 +874,18 @@ function update(dt) {
   if (s.laserLv > 0) { G.laserT -= dt; if (G.laserT <= 0) { G.laserT = s.laserCd; fireLaser(); } }
   if (s.echo) { G.echoT -= dt; if (G.echoT <= 0) { G.echoT = 6; fireVolley(); G.beams.push({ ring: true, x: G.px, y: G.py, r: 40, t: 0, life: 0.2, color: '#8af0ff' }); } }
   if (s.ripple) { G.rippleT -= dt; if (G.rippleT <= 0) { G.rippleT = 12; G.rippleActive = 3; G.beams.push({ ring: true, x: G.px, y: G.py, r: Math.max(W, H), t: 0, life: 0.5, color: '#8affff' }); } }
+  if (s.pulse > 0) { // EVENT HORIZON shockwave — wipes every enemy bullet
+    G.pulseT -= dt;
+    if (G.pulseT <= 0) {
+      G.pulseT = s.pulse;
+      G.eB.length = 0;
+      G.beams.push({ ring: true, x: G.px, y: G.py, r: Math.max(W, H), t: 0, life: 0.45, color: '#ff5f6d' });
+    }
+  }
   if (s.barrage) {
     G.barrageT -= dt;
     if (G.barrageT <= 0) {
-      G.barrageT = 18;
+      G.barrageT = s.barrageCd;
       for (let i = 0; i < 6; i++) {
         const t = G.enemies.length ? pick(G.enemies) : { x: rand(60, W - 60), y: rand(60, H - 60) };
         G.zones.push({ x: t.x + rand(-40, 40), y: t.y + rand(-40, 40), r: 90, t: 0, tel: 0.6 + i * 0.12 });
@@ -1128,6 +1228,7 @@ function updateHUD() {
 
 function unitChipText(u) {
   if (u.kind === 'family') return `${FAMILIES[u.key].name} ${u.level}`;
+  if (u.kind === 'primordial') return `🜏 ${PRIMORDIALS[u.key].name} Lv${u.level}`;
   return `${'★'.repeat(Math.min(u.stars, 5))}${u.stars > 5 ? '×' + u.stars : ''} ${u.name} Lv${u.level}`;
 }
 function unitChipColor(u) {
@@ -1153,8 +1254,10 @@ function buildRecapHTML() {
   const rows = G.units.map(u => {
     const sum = unitSummary(u);
     const col = unitChipColor(u);
-    const tierTag = u.kind === 'fusion' ? ` <small>(${TIERS[u.tier].name} Lv${u.level}${u.stars ? ' ★' + u.stars : ''})</small>` : ` <small>Lv${u.level}</small>`;
-    const name = u.kind === 'family' ? FAMILIES[u.key].name : u.name;
+    const tierTag = u.kind === 'family' ? ` <small>Lv${u.level}</small>`
+      : ` <small>(${TIERS[u.tier].name} Lv${u.level}${u.stars ? ' ★' + u.stars : ''})</small>`;
+    const name = u.kind === 'family' ? FAMILIES[u.key].name
+      : u.kind === 'primordial' ? '🜏 ' + PRIMORDIALS[u.key].name : u.name;
     return `<div style="color:${col};margin:3px 0"><b>${name}</b>${tierTag}<br>
       <small style="color:var(--dim)">${sum.effects.join(' · ')}${sum.specials.length ? ' · ' + sum.specials.join(' · ') : ''}</small></div>`;
   }).join('');
@@ -1242,13 +1345,15 @@ requestAnimationFrame(frame);
 // Debug / test API
 // ---------------------------------------------------------------------------
 window.__GAME__ = {
-  FAMILIES, FAMILY_KEYS, TIERS, SPECIALS, CATS,
+  FAMILIES, FAMILY_KEYS, TIERS, SPECIALS, CATS, PRIMORDIALS, PRIMORDIAL_KEYS, PRIMORDIAL_CHANCE,
   get state() { return state; },
   get G() { return G; },
   get stats() { return G.stats; },
   start: startGame,
   grantFamily(key) { applyCard({ type: 'new', key }); },
+  grantPrimordial(key) { applyCard({ type: 'primordial', key }); },
   levelUnit(i, n) { const u = G.units[i]; for (let k = 0; k < (n || 1); k++) applyCard({ type: 'level', u }); return u; },
   forceLevelUp() { G.pendingLevels++; },
+  hurt(d) { hurtPlayer(d); },
   unitSummary, autoFuse, makeFamilyUnit,
 };

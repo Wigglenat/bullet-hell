@@ -83,7 +83,34 @@ const TIERS = [
   { tier: 3, name: 'Ascended',     color: '#4aa8ff', jp: '昇', baseMult: 1.35, perLevel: 0.10, maxLevel: 9 },
   { tier: 4, name: 'Transcendent', color: '#c063ff', jp: '超', baseMult: 1.60, perLevel: 0.12, maxLevel: 9 },
   { tier: 5, name: 'Mythic',       color: '#ffb454', jp: '神', baseMult: 2.00, perLevel: 0.15, maxLevel: 999 },
+  { tier: 6, name: 'Primordial',   color: '#ff5f6d', jp: '原', baseMult: 1.00, perLevel: 0.25, maxLevel: 999 },
 ];
+
+// ---------------------------------------------------------------------------
+// PRIMORDIAL relics — tier 6. Not craftable, not fusable: a 0.01% roll on any
+// level-up card slot (1 in 10,000). They ignore normal stat caps, never take
+// a build slot, and each warps the game in its own way. +25% per level.
+// ---------------------------------------------------------------------------
+const PRIMORDIALS = {
+  genesis:    { name: 'GENESIS ENGINE',
+    desc: '+100% damage · +50% fire rate · +4 bullets · and your damage grows another +1% every second, forever' },
+  worldheart: { name: 'WORLDHEART',
+    desc: '+300 max HP · +10 HP/s regen · +25% lifesteal · you resurrect at full HP (90s cooldown)' },
+  horizon:    { name: 'EVENT HORIZON',
+    desc: 'a vast field slows enemies AND their bullets by 60% · every 10s a shockwave erases every enemy bullet on screen' },
+  firstlight: { name: 'FIRST LIGHT',
+    desc: 'a mega-laser fires every 1.5s · +50% crit chance · crits deal 4× damage' },
+  swarm:      { name: 'ALPHA SWARM',
+    desc: '+8 orbital blades · every kill bursts into homing shards' },
+  omega:      { name: 'OMEGA PROTOCOL',
+    desc: 'apocalypse barrage every 12s · +3 shield charges at double regen · near-instant bombs' },
+};
+const PRIMORDIAL_KEYS = Object.keys(PRIMORDIALS);
+const PRIMORDIAL_CHANCE = 0.0001; // 0.01% per level-up card slot
+
+function makePrimordialUnit(key) {
+  return { kind: 'primordial', key, tier: 6, level: 1, stars: 0 };
+}
 
 // How ready a unit must be to auto-fuse.
 const FUSE_READY_FAMILY_LEVEL = 3; // two Lv3+ families → Fused
@@ -189,9 +216,11 @@ function unitAmp(unit) {
 }
 
 // Calls cb(familyKey, effectiveLevel) for each family in the unit's tree.
+// Primordial relics don't map to families — the engine applies them directly.
 function walkUnit(unit, cb, amp) {
   amp = (amp || 1) * unitAmp(unit);
   if (unit.kind === 'family') { cb(unit.key, unit.level * amp); return; }
+  if (unit.kind !== 'fusion') return;
   for (const m of unit.members) walkUnit(m, cb, amp);
 }
 
@@ -204,6 +233,9 @@ function walkSpecials(unit, cb) {
 
 // Plain-language summary lines for a unit (cards, pause screen, death screen).
 function unitSummary(unit) {
+  if (unit.kind === 'primordial') {
+    return { effects: [PRIMORDIALS[unit.key].desc], specials: [] };
+  }
   const fams = new Map();
   walkUnit(unit, (key, lv) => fams.set(key, (fams.get(key) || 0) + lv));
   const lines = [...fams.entries()].map(([key, lv]) =>

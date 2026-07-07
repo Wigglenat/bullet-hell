@@ -32,6 +32,25 @@ two Transcendent at Lv 2+    →  MYTHIC        "OUROBOROS — Colossal Barrage"
 two Mythics                  →  ★ OVERCHARGE  everything ×1.5, stacks forever
 ```
 
+## 🜏 Primordial — the 0.01% tier
+
+Above Mythic sits **Primordial**: not craftable, not fusable. Every level-up
+card slot has a **1-in-10,000 (0.01%)** chance to be replaced by a glowing
+crimson Primordial relic. Relics ignore the normal stat caps, **don't take a
+build slot**, and each one warps the run:
+
+| Relic | What it does |
+|---|---|
+| **GENESIS ENGINE** | +100% damage, +50% fire rate, +4 bullets — and damage grows another +1% every second, forever |
+| **WORLDHEART** | +300 max HP, +10 HP/s, +25% lifesteal — and you resurrect at full HP (90s cooldown) |
+| **EVENT HORIZON** | a vast field slows enemies *and* their bullets 60%; every 10s a shockwave erases every enemy bullet |
+| **FIRST LIGHT** | mega-laser every 1.5s, +50% crit chance, crits deal 4× |
+| **ALPHA SWARM** | +8 orbital blades; every kill bursts into homing shards |
+| **OMEGA PROTOCOL** | apocalypse barrage every 12s, +3 shields at double regen, near-instant bombs |
+
+Relics can level (rarely offered as cards): each level makes the whole relic
++25% stronger.
+
 Fusing frees a build slot (you hold at most 6 powers), and a fused-away classic
 can be picked up fresh and grown again — that's the engine of infinite scaling.
 Fusion names are readable (adjective of one part + noun of the other), and the
