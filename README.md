@@ -42,6 +42,19 @@ a burst of XP gems plus an **ELITE SPOILS** level-up where every card grants
 Spoils draws only offer level-ups, so elite hunting is the fastest road to
 your next fusion.
 
+## Sectors & the Warden
+
+A run is split into **sectors of 100 waves**. Wave 100 empties the arena — one
+enemy comes alone: the **SECTOR WARDEN** (*APOPHIS — WARDEN OF SECTOR 1*, …).
+It's reactive: it **reads your bullets and sidesteps** converging fire. Three
+dodges and it's **EXHAUSTED** for four seconds — that gold ring is your punish
+window. It holds mid-range, switches patterns based on your distance, and
+enrages below 40% HP.
+
+Kill it and the sector is cleared: half your HP back, a **SECTOR SPOILS** draw
+with double levels and **1.01% Primordial odds** (base 0.01% + a flat 1%), and
+Sector N+1 begins at wave 1 with difficulty carrying over.
+
 ## 🜏 Primordial — the 0.01% tier
 
 Above Mythic sits **Primordial**: not craftable, not fusable. Every level-up
