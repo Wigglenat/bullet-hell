@@ -2,7 +2,7 @@
 /* ============================================================================
  * POWERS.JS v2 — legible bullet-hell powers + automatic fusion.
  *
- * The build is a set of UNITS (max 6 slots):
+ * The build is a set of UNITS (no cap — buffs stack without limit):
  *   - family unit : one classic upgrade (Lifesteal, Chase, +Bullets…), Lv 1-9
  *   - fusion unit : created AUTOMATICALLY when two units qualify; keeps both
  *                   parents' effects, amplifies them, and adds a special.
@@ -14,8 +14,10 @@
  *   two Transcendent at Lv 2+      →  MYTHIC       (Tier 5, levels uncapped)
  *   two Mythics                    →  ★ OVERCHARGE (stacking, uncapped)
  *
- * A fused family frees its slot and can be picked up again fresh — so deep
- * runs keep stacking the same classics into ever-bigger fusions.
+ * A fused-away family can be picked up again fresh — so deep runs keep
+ * stacking the same classics into ever-bigger fusions. Fusion names come
+ * from FUSION_NAMES (js/fusion-names.js): a curated thematic name for every
+ * pair, e.g. Lifesteal+Thorns = "Blood Barrier".
  * ==========================================================================*/
 
 // ---------------------------------------------------------------------------
@@ -220,8 +222,13 @@ function leadFamily(unit) {
 }
 
 function fusionName(a, b, tier) {
-  const adj = FAMILIES[leadFamily(a)].adj, noun = FAMILIES[leadFamily(b)].noun;
-  const core = `${adj} ${noun}`;
+  // curated thematic names per pair (e.g. Lifesteal+Thorns = "Blood Barrier"),
+  // falling back to adjective+noun if a pair is somehow missing
+  const ka = leadFamily(a), kb = leadFamily(b);
+  const ia = FAMILY_KEYS.indexOf(ka), ib = FAMILY_KEYS.indexOf(kb);
+  const key = ia <= ib ? ka + '|' + kb : kb + '|' + ka;
+  const core = (typeof FUSION_NAMES !== 'undefined' && FUSION_NAMES[key]) ||
+    `${FAMILIES[ka].adj} ${FAMILIES[kb].noun}`;
   if (tier === 3) return `Ascended ${core}`;
   if (tier === 4) return `Transcendent ${core}`;
   if (tier === 5) return `${MYTH_BEINGS[strHash(core) % MYTH_BEINGS.length]} — ${core}`;

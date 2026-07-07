@@ -381,9 +381,8 @@ function recompute() {
 }
 
 // ---------------------------------------------------------------------------
-// Build changes
+// Build changes — no unit cap: buffs stack without limit
 // ---------------------------------------------------------------------------
-const MAX_UNITS = 6;
 
 function applyCard(card) {
   if (card.type === 'new') {
@@ -438,10 +437,9 @@ function cardPool(spoils) {
     pool.push({ type: 'level', u, w });
   }
   if (spoils && pool.length) return pool; // elite spoils: pure deepening
-  if (G.units.filter(u => u.kind !== 'primordial').length < MAX_UNITS) { // relics don't take slots
-    for (const key of FAMILY_KEYS) {
-      if (!G.units.some(u => u.kind === 'family' && u.key === key)) pool.push({ type: 'new', key, w: 2 });
-    }
+  // no build limit — stack as many powers as the run gives you
+  for (const key of FAMILY_KEYS) {
+    if (!G.units.some(u => u.kind === 'family' && u.key === key)) pool.push({ type: 'new', key, w: 2 });
   }
   pool.push({ type: 'ess', key: 'dmg', w: 1 }, { type: 'ess', key: 'rate', w: 1 }, { type: 'ess', key: 'life', w: 1 });
   return pool;
@@ -2065,12 +2063,22 @@ function refreshChips() {
   const el = $('powerChips');
   if (!el) return;
   el.innerHTML = '';
-  for (const u of G.units || []) {
+  const units = G.units || [];
+  // highest-tier units first, capped so the HUD stays readable (P shows all)
+  const shown = units.slice().sort((a, b) => b.tier - a.tier).slice(0, 12);
+  for (const u of shown) {
     const chip = document.createElement('div');
     chip.className = 'chip';
     const col = unitChipColor(u);
     chip.style.borderColor = col; chip.style.color = col;
     chip.textContent = unitChipText(u);
+    el.appendChild(chip);
+  }
+  if (units.length > shown.length) {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.style.borderColor = '#96a0c2'; chip.style.color = '#96a0c2';
+    chip.textContent = '+' + (units.length - shown.length) + ' more — press P';
     el.appendChild(chip);
   }
 }

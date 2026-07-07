@@ -88,10 +88,11 @@ build slot**, and each one warps the run:
 Relics can level (rarely offered as cards): each level makes the whole relic
 +25% stronger.
 
-Fusing frees a build slot (you hold at most 6 powers), and a fused-away classic
-can be picked up fresh and grown again — that's the engine of infinite scaling.
-Fusion names are readable (adjective of one part + noun of the other), and the
-pause screen (`P`) lists every effect in plain numbers.
+There is **no build limit** — stack as many powers as the run gives you, and a
+fused-away classic can be picked up fresh and grown again. Every fusion pair
+has its own **thematic name** (Lifesteal + Thorns = **Blood Barrier**,
+Chase + Fire Rounds = **Hellhound Rounds** — all 903 combinations are named),
+and the pause screen (`P`) lists every effect in plain numbers.
 
 ## Controls
 
@@ -115,7 +116,8 @@ your bullets are quiet cyan; bosses (every 10th wave) get a name and an HP bar.
 ## Repo layout
 
 ```
-index.html      shell + styling + overlays
-js/powers.js    the 20 families, fusion tiers, auto-fusion logic
-js/game.js      engine: sim loop, firing systems, enemies, waves, UI
+index.html         shell + styling + overlays
+js/fusion-names.js curated thematic names for all 903 fusion pairs
+js/powers.js       the 42 families, fusion tiers, auto-fusion logic
+js/game.js         engine: sim loop, firing systems, enemies, waves, UI
 ```
