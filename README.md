@@ -1,4 +1,4 @@
-# MYRIAD BREAK — auto-fusing bullet hell
+# SPACE SOULS — auto-fusing bullet hell
 
 A bullet hell where your upgrades **fuse themselves**. Pure canvas + vanilla JS,
 no build step, no dependencies.
@@ -10,11 +10,11 @@ no build step, no dependencies.
 
 Your ship fires by itself — you **dodge**, collect XP gems, and pick upgrades.
 The arena is zoomed out for real maneuvering room. Every level-up offers 3
-cards from the 32 classics:
+cards from the 42 classics:
 
 | Attack | Defense | Utility |
 |---|---|---|
-| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger | Speed, Magnetic, Slow Field, Bomb, Greed, Adrenaline, Shrink |
+| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Mortar, Explosive Rounds, Frost Shot, Impact, Turret, Vortex | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger, Ram | Speed, Magnetic, Slow Field, Bomb, Greed, Adrenaline, Shrink, Graze |
 
 Every card says exactly what it does ("+1 bullet", "+3% lifesteal", "+1 shield
 charge"). Picking the same family again levels it up.
@@ -32,6 +32,15 @@ two Ascended at Lv 2+        →  TRANSCENDENT  gains big specials (time-ripple,
 two Transcendent at Lv 2+    →  MYTHIC        "OUROBOROS — Colossal Barrage", levels uncapped
 two Mythics                  →  ★ OVERCHARGE  everything ×1.5, stacks forever
 ```
+
+## Named elites
+
+Gold-ringed, personally named horrors — **VORAX THE HUNGERING**, **NYXA
+STAR-EATER** — stalk in from wave 2 onward. They're tanky, fast, and worth it:
+a burst of XP gems plus an **ELITE SPOILS** level-up where every card grants
+**double levels** and the Primordial roll is boosted to **0.5%** (×50).
+Spoils draws only offer level-ups, so elite hunting is the fastest road to
+your next fusion.
 
 ## 🜏 Primordial — the 0.01% tier
 

@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================================
- * MYRIAD BREAK v2 — readable bullet-hell, classic powers, automatic fusion.
+ * SPACE SOULS — readable bullet-hell, classic powers, automatic fusion.
  * Requires powers.js (FAMILIES, TIERS, SPECIALS, makeFamilyUnit, autoFuse…).
  *
  * Readability rules this engine follows:
@@ -18,7 +18,7 @@ const ctx = cv.getContext('2d');
 const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 // Zoomed-out camera: the world is bigger than the window and rendered scaled
 // down — more room to weave. Phones zoom out less so bullets stay readable.
-const ZOOM = IS_TOUCH ? 0.8 : 0.7;
+const ZOOM = IS_TOUCH ? 0.72 : 0.6;
 let W = 0, H = 0, dprCur = 1;
 function resize() {
   dprCur = Math.min(window.devicePixelRatio || 1, 2);
@@ -174,7 +174,7 @@ const ST = { TITLE: 0, PLAY: 1, LEVELUP: 2, PAUSE: 3, DEAD: 4 };
 let state = ST.TITLE;
 
 const store = (() => { try { const s = window.localStorage; s.getItem('x'); return s; } catch (e) { return null; } })();
-let bestWave = +((store && store.getItem('myriad.bestWave')) || 0);
+let bestWave = +((store && (store.getItem('spacesouls.bestWave') || store.getItem('myriad.bestWave'))) || 0);
 
 const G = {};
 function newRun() {
@@ -187,7 +187,10 @@ function newRun() {
     stats: null, shield: 0, shieldT: 0,
     gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18, bombT: 0,
     rippleActive: 0, bladeCd: [], rampStart: null, rampMult: 1, pulseT: 0, rebirthT: 0, adrenT: 0,
+    missileT: 2, mortarT: 2.5, turretT: 3, vortexT: 4, heatT: 0,
+    eliteT: 20, eliteSpoils: 0,
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
+    turrets: [], vortices: [],
     spawnT: 1.0, bossAlive: null, bannerQ: [], bannerT: 0,
   });
   // starting kit: +Bullets Lv1 — instantly legible
@@ -196,6 +199,9 @@ function newRun() {
   G.hp = G.stats.maxHp;
 }
 function xpNeed(lv) { return Math.floor(5 + lv * 3 + lv * lv * 0.2); }
+function checkLevel() {
+  while (G.xp >= G.xpNeed) { G.xp -= G.xpNeed; G.level++; G.xpNeed = xpNeed(G.level); G.pendingLevels++; }
+}
 
 // ---------------------------------------------------------------------------
 // Stats — one aggregate, recomputed only when the build changes
@@ -214,6 +220,9 @@ function recompute() {
     shardHoming: false,
     rear: 0, side: 0, arc: 0, cull: 0, thorns: 0, armor: 0, dodge: 0,
     scav: 0, xpMult: 1, adren: 0, hitR: 3.5,
+    drones: 0, missiles: 0, missileCd: 0, mortar: 0, mortarCd: 0, boom: 0,
+    frost: 0, knock: 0, turrets: 0, turretCd: 0, vortex: 0, vortexCd: 0,
+    graze: 0, grazeR: 0, grazeHeat: 0, ram: 0,
   };
   s.dmg *= 1 + 0.04 * G.ess.dmg;
   s.rate *= 1 + 0.03 * G.ess.rate;
@@ -256,6 +265,19 @@ function recompute() {
       case 'greed':     s.xpMult += 0.10 * L; break;
       case 'adrenaline':s.adren = Math.max(s.adren, 3 + 0.5 * L); break;
       case 'shrink':    s.hitR = Math.min(s.hitR, Math.max(1.6, 3.5 * (1 - 0.06 * Math.min(L, 9)))); break;
+      case 'drones':    s.drones = Math.min(6, s.drones + Math.round(L)); break;
+      case 'missiles':  s.missiles = Math.min(8, s.missiles + Math.round(L));
+                        s.missileCd = Math.max(1.2, 2.4 - 0.15 * L); break;
+      case 'mortar':    s.mortar += L; s.mortarCd = Math.max(1.6, 3.2 - 0.18 * L); break;
+      case 'boom':      s.boom = Math.min(0.6, s.boom + 0.08 * L); break;
+      case 'frost':     s.frost = Math.min(0.8, s.frost + 0.10 * L); break;
+      case 'impact':    s.knock += 90 * L; break;
+      case 'turret':    s.turrets = Math.min(4, Math.max(s.turrets, 1 + Math.floor(L / 3)));
+                        s.turretCd = Math.max(3, 6 - 0.3 * L); break;
+      case 'vortex':    s.vortex += L; s.vortexCd = Math.max(3.5, 7 - 0.3 * L); break;
+      case 'graze':     s.graze += L; s.grazeR = Math.min(64, 30 + 2.5 * L);
+                        s.grazeHeat = Math.min(0.35, 0.02 * L + s.grazeHeat); break;
+      case 'ram':       s.ram += 0.35 * L; break;
     }
   });
   for (const u of G.units) walkSpecials(u, (sp) => {
@@ -395,22 +417,30 @@ function announce(txt, color) {
 // ---------------------------------------------------------------------------
 // Level-up cards
 // ---------------------------------------------------------------------------
-function cardPool() {
+function cardPool(spoils) {
   const pool = [];
   for (const u of G.units) {
-    if (u.level < TIERS[u.tier].maxLevel) pool.push({ type: 'level', u, w: u.kind === 'primordial' ? 1 : 3 });
+    if (u.level >= TIERS[u.tier].maxLevel) continue;
+    // deepening beats widening: level-ups outweigh new families, and a family
+    // one pick from fusion-ready (Lv2 → Lv3) is pushed hard so merges HAPPEN
+    let w = 4;
+    if (u.kind === 'primordial') w = 1;
+    else if (u.kind === 'family' && u.level === 2) w = 8;
+    else if (u.kind === 'fusion' && u.level === 1) w = 6; // one pick from the next tier
+    pool.push({ type: 'level', u, w });
   }
+  if (spoils && pool.length) return pool; // elite spoils: pure deepening
   if (G.units.filter(u => u.kind !== 'primordial').length < MAX_UNITS) { // relics don't take slots
     for (const key of FAMILY_KEYS) {
-      if (!G.units.some(u => u.kind === 'family' && u.key === key)) pool.push({ type: 'new', key, w: 3 });
+      if (!G.units.some(u => u.kind === 'family' && u.key === key)) pool.push({ type: 'new', key, w: 2 });
     }
   }
   pool.push({ type: 'ess', key: 'dmg', w: 1 }, { type: 'ess', key: 'rate', w: 1 }, { type: 'ess', key: 'life', w: 1 });
   return pool;
 }
 
-function drawCards(n) {
-  const pool = cardPool(), out = [];
+function drawCards(n, spoils) {
+  const pool = cardPool(spoils), out = [];
   for (let k = 0; k < n && pool.length; k++) {
     let total = 0;
     for (const c of pool) total += c.w;
@@ -476,12 +506,19 @@ function openLevelUp() {
   state = ST.LEVELUP;
   G.pendingLevels--;
   SFX.level();
+  const spoils = G.eliteSpoils > 0;
+  if (spoils) G.eliteSpoils--;
+  const subEl = document.querySelector('#ovLevel .sub');
+  if (subEl) subEl.textContent = spoils
+    ? '★ ELITE SPOILS — cards grant DOUBLE levels · Primordial odds ×50'
+    : 'Choose one.';
   const wrap = document.getElementById('cards');
   wrap.innerHTML = '';
-  const cards = drawCards(3);
-  // PRIMORDIAL roll — each slot has a 0.01% chance (1 in 10,000)
+  const cards = drawCards(3, spoils);
+  // PRIMORDIAL roll — 0.01% per slot (1 in 10,000), ×50 on elite spoils
+  const primChance = spoils ? PRIMORDIAL_CHANCE * 50 : PRIMORDIAL_CHANCE;
   for (let i = 0; i < cards.length; i++) {
-    if (Math.random() >= PRIMORDIAL_CHANCE) continue;
+    if (Math.random() >= primChance) continue;
     const unowned = PRIMORDIAL_KEYS.filter(k => !G.units.some(u => u.kind === 'primordial' && u.key === k));
     if (unowned.length) cards[i] = { type: 'primordial', key: unowned[(Math.random() * unowned.length) | 0] };
     else {
@@ -497,6 +534,9 @@ function openLevelUp() {
     el.innerHTML = info.html;
     el.addEventListener('click', () => {
       applyCard(card);
+      if (spoils && card.type === 'level' && card.u.level < TIERS[card.u.tier].maxLevel) {
+        applyCard(card); // elite spoils: double level
+      }
       G.hp = Math.min(G.stats.maxHp, G.hp + G.stats.maxHp * 0.15);
       closeOverlays();
       if (G.pendingLevels > 0) openLevelUp();
@@ -580,6 +620,11 @@ function fireFan(a0, n, dmgMult) {
   }
 }
 
+function dronePos(i, n) {
+  const a = G.time * 2 + TAU * i / n;
+  return { x: G.px + Math.cos(a) * 38, y: G.py + Math.sin(a) * 38 };
+}
+
 function fireVolley() {
   const s = G.stats;
   const a0 = aimAngle();
@@ -589,6 +634,26 @@ function fireVolley() {
     const nSide = Math.min(s.side, 8);
     fireFan(a0 + Math.PI / 2, nSide, 0.6);
     fireFan(a0 - Math.PI / 2, nSide, 0.6);
+  }
+  for (let i = 0; i < s.drones; i++) {                                          // Drones copy your shot
+    const p = dronePos(i, s.drones);
+    poolPush(G.pB, CAP.pB, {
+      x: p.x, y: p.y, vx: Math.cos(a0) * s.speed, vy: Math.sin(a0) * s.speed,
+      t: 0, life: 1.5, size: s.size * 0.8, dmg: s.dmg * 0.5,
+      pierce: s.pierce, bounce: 0, homing: s.homing, hit: null,
+    });
+  }
+}
+
+function fireMissiles() {
+  const s = G.stats;
+  for (let i = 0; i < s.missiles; i++) {
+    const a = Math.atan2(G.faceY, G.faceX) + Math.PI + rand(-0.6, 0.6); // launch backward, curl in
+    poolPush(G.pB, CAP.pB, {
+      x: G.px, y: G.py, vx: Math.cos(a) * 240, vy: Math.sin(a) * 240,
+      t: 0, life: 2.6, size: 5, dmg: s.dmg * 0.9,
+      pierce: 0, bounce: 0, homing: 4.5, hit: null, mBlast: true,
+    });
   }
 }
 
@@ -640,7 +705,8 @@ function bomb(x, y, r, dmg) {
 function hitEnemy(en, dmg, noArc) {
   const s = G.stats;
   const isCrit = Math.random() < s.crit;
-  const d = dmg * (isCrit ? s.critMult : 1) * (G.rampMult || 1);
+  const d = dmg * (isCrit ? s.critMult : 1) * (G.rampMult || 1)
+    * (G.heatT > 0 ? 1 + s.grazeHeat : 1); // Graze heat
   en.hp -= d;
   en.flash = 0.08;
   G.dmgDealt += d;
@@ -655,6 +721,14 @@ function hitEnemy(en, dmg, noArc) {
       G.beams.push({ x: en.x, y: en.y, a: Math.atan2(best.y - en.y, best.x - en.x), len: Math.sqrt(bd), w: 2, color: '#ffe94a', t: 0, life: 0.1 });
       hitEnemy(best, dmg * 0.6, true);
     }
+  }
+  // Frost Shot — chill
+  if (s.frost > 0 && Math.random() < s.frost) { en.chillT = 1.2; en.chillF = 0.4; }
+  // Impact — shove away from the player (elites resist, bosses immune)
+  if (s.knock > 0 && !en.boss) {
+    const kdx = en.x - G.px, kdy = en.y - G.py, kd = Math.hypot(kdx, kdy) || 1;
+    const kk = s.knock * (en.elite ? 0.35 : 1);
+    en.kx += kdx / kd * kk; en.ky += kdy / kd * kk;
   }
   // Executioner — finish weakened non-boss enemies
   if (s.cull > 0 && !en.boss && en.hp > 0 && en.hp < en.maxHp * s.cull) {
@@ -672,9 +746,16 @@ function killEnemy(en) {
   SFX.kill();
   burst(en.x, en.y, en.color, en.boss ? 50 : 6, en.boss ? 380 : 150);
   const s = G.stats;
-  const gems = en.boss ? 30 : 1;
+  const gems = en.boss ? 30 : en.elite ? 8 : 1;
   for (let i = 0; i < gems; i++) {
     poolPush(G.gems, CAP.gems, { x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp / gems)), t: 0 });
+  }
+  if (en.elite) { // spoils: a bonus draw with double levels and 50× Primordial odds
+    G.eliteSpoils++;
+    G.pendingLevels++;
+    G.shake = Math.max(G.shake, 9);
+    announce('★ ' + (en.name || 'ELITE') + ' DOWN — SPOILS', '#ffd24a');
+    burst(en.x, en.y, '#ffd24a', 30, 320);
   }
   if (s.splitShards > 0) {
     for (let k = 0; k < s.splitShards; k++) {
@@ -728,7 +809,7 @@ function spawnEnemy(type, x, y, hpMult) {
     speed: T.speed * (1 + G.wave * 0.008), dmg: T.dmg * (1 + G.wave * 0.05),
     color: T.color, xp: T.xp, t: rand(0, 9), shootT: rand(1.2, 2.6),
     boss: type === 'boss', dashT: 0, dvx: 0, dvy: 0, ang: Math.random() * TAU,
-    dead: false, flash: 0,
+    dead: false, flash: 0, kx: 0, ky: 0, chillT: 0, chillF: 0, ramCd: 0, elite: false,
   };
   if (en.boss) {
     en.name = pick(MYTH_BEINGS) + ' THE DEVOURER';
@@ -756,6 +837,35 @@ function edgeSpawnPos() {
   return { x: W + m, y: rand(0, H) };
 }
 
+// ---------------------------------------------------------------------------
+// Named elites — rare, gold-ringed, worth a fortune. Killing one grants an
+// ELITE SPOILS level-up: double-level cards and 50× Primordial odds.
+// ---------------------------------------------------------------------------
+const ELITE_NAMES = ['VORAX', 'SERAKH', 'MALGRIM', 'KZARR', 'NYXA', 'THAROK',
+  'VELMIRA', 'OZGUTH', 'RHAEN', 'ZYKKAR', 'DREXA', 'MOLOCH'];
+const ELITE_TITLES = ['THE HUNGERING', 'THE UNBLINKING', 'VOID-CALLER', 'STAR-EATER',
+  'THE SWIFT', 'THE ADAMANT', 'GRAVEMAKER', 'THE BOUNDLESS', 'SOUL-RENDER',
+  'THE RADIANT', 'STORM-BEARER', 'THE ENDLESS'];
+
+function spawnElite() {
+  const base = pick(['chaser', 'shooter', 'spinner', 'tank', 'darter', 'splitter']);
+  const p = edgeSpawnPos();
+  if (G.enemies.length >= CAP.enemies) { // an elite always finds room
+    const idx = G.enemies.findIndex(e => !e.boss && !e.elite);
+    if (idx >= 0) G.enemies.splice(idx, 1);
+  }
+  const en = spawnEnemy(base, p.x, p.y, 7);
+  if (!en) return null;
+  en.elite = true;
+  en.name = pick(ELITE_NAMES) + ' ' + pick(ELITE_TITLES);
+  en.r *= 1.45;
+  en.speed *= 1.15;
+  en.dmg *= 1.3;
+  en.xp = 20 + G.wave * 2;
+  announce('⚠ ' + en.name, '#ffd24a');
+  return en;
+}
+
 function updateWave(dt) {
   G.waveT += dt;
   if (G.waveT >= 22) {
@@ -765,6 +875,14 @@ function updateWave(dt) {
       const p = edgeSpawnPos();
       spawnEnemy('boss', p.x, p.y, 1 + G.wave / 18);
     }
+  }
+  // elite cadence: first around 20s, then every 30–45s, max 2 alive
+  G.eliteT -= dt;
+  if (G.eliteT <= 0 && G.wave >= 2) {
+    G.eliteT = rand(30, 45);
+    let alive = 0;
+    for (const e of G.enemies) if (e.elite) alive++;
+    if (alive < 2) spawnElite();
   }
   G.spawnT -= dt;
   if (G.spawnT <= 0) {
@@ -790,7 +908,9 @@ function slowFactorAt(x, y) {
 function updateEnemy(en, dt) {
   en.t += dt;
   if (en.flash > 0) en.flash -= dt;
-  const sp = en.speed * slowFactorAt(en.x, en.y);
+  if (en.chillT > 0) en.chillT -= dt;
+  if (en.ramCd > 0) en.ramCd -= dt;
+  const sp = en.speed * slowFactorAt(en.x, en.y) * (en.chillT > 0 ? 1 - en.chillF : 1);
   const dx = G.px - en.x, dy = G.py - en.y, d = Math.hypot(dx, dy) || 1;
 
   switch (en.type) {
@@ -866,8 +986,23 @@ function updateEnemy(en, dt) {
       break;
     }
   }
+  // knockback / vortex-pull velocity with decay
+  if (en.kx || en.ky) {
+    en.x += en.kx * dt; en.y += en.ky * dt;
+    const kdec = Math.pow(0.02, dt);
+    en.kx *= kdec; en.ky *= kdec;
+    if (Math.abs(en.kx) < 1 && Math.abs(en.ky) < 1) { en.kx = 0; en.ky = 0; }
+  }
   en.x = clamp(en.x, -60, W + 60); en.y = clamp(en.y, -60, H + 60);
-  if (G.iT <= 0 && dist2(en.x, en.y, G.px, G.py) < (en.r + 8) * (en.r + 8)) hurtPlayer(en.dmg);
+  if (dist2(en.x, en.y, G.px, G.py) < (en.r + 8) * (en.r + 8)) {
+    const s = G.stats;
+    if (s.ram > 0 && en.ramCd <= 0) {         // Ram — contact hurts THEM
+      en.ramCd = 0.3;
+      hitEnemy(en, s.dmg * s.ram, true);
+      if (en.hp <= 0) return;
+    }
+    if (G.iT <= 0) hurtPlayer(en.dmg);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -979,8 +1114,60 @@ function update(dt) {
   if (G.gunAcc > 6) G.gunAcc = 6;
 
   // systems
+  if (G.heatT > 0) G.heatT -= dt;
   if (s.novaLv > 0) { G.novaT -= dt; if (G.novaT <= 0) { G.novaT = s.novaCd; fireNova(); } }
   if (s.laserLv > 0) { G.laserT -= dt; if (G.laserT <= 0) { G.laserT = s.laserCd; fireLaser(); } }
+  if (s.missiles > 0) { G.missileT -= dt; if (G.missileT <= 0 && G.enemies.length) { G.missileT = s.missileCd; fireMissiles(); } }
+  if (s.mortar > 0) {                                             // Mortar — telegraphed artillery
+    G.mortarT -= dt;
+    if (G.mortarT <= 0 && G.enemies.length) {
+      G.mortarT = s.mortarCd;
+      const t = pick(G.enemies);
+      G.zones.push({ x: t.x + rand(-24, 24), y: t.y + rand(-24, 24), r: Math.min(150, 70 + 3 * s.mortar), t: 0, tel: 0.7, dmg: s.dmg * 1.6 });
+    }
+  }
+  if (s.turrets > 0) {                                            // Turret deployment
+    G.turretT -= dt;
+    if (G.turretT <= 0 && G.turrets.length < s.turrets) { G.turretT = s.turretCd; G.turrets.push({ x: G.px, y: G.py, t: 0, acc: 0 }); }
+  }
+  for (let i = G.turrets.length - 1; i >= 0; i--) {
+    const tr = G.turrets[i];
+    tr.t += dt;
+    if (tr.t >= 9) { G.turrets.splice(i, 1); continue; }
+    tr.acc += dt * 2;
+    if (tr.acc > 2) tr.acc = 2;
+    while (tr.acc >= 1) {
+      tr.acc -= 1;
+      const t = nearestEnemy(tr.x, tr.y);
+      if (!t) break;
+      const a = Math.atan2(t.y - tr.y, t.x - tr.x);
+      poolPush(G.pB, CAP.pB, { x: tr.x, y: tr.y, vx: Math.cos(a) * 380, vy: Math.sin(a) * 380, t: 0, life: 1.4, size: 4.5, dmg: s.dmg * 0.55, pierce: 0, bounce: 0, homing: 0, hit: null });
+    }
+  }
+  if (s.vortex > 0) {                                             // Vortex rifts
+    G.vortexT -= dt;
+    if (G.vortexT <= 0 && G.enemies.length) {
+      G.vortexT = s.vortexCd;
+      const t = pick(G.enemies);
+      G.vortices.push({ x: t.x, y: t.y, t: 0, dur: 1.4 });
+    }
+  }
+  for (let i = G.vortices.length - 1; i >= 0; i--) {
+    const v = G.vortices[i];
+    v.t += dt;
+    if (v.t >= v.dur) { G.vortices.splice(i, 1); continue; }
+    nearEnemies(v.x, v.y, 170, _near);
+    for (const en of _near) {
+      if (en.hp <= 0 || en.boss) continue;
+      const vd = Math.hypot(v.x - en.x, v.y - en.y) || 1;
+      if (vd > 170) continue;
+      en.kx += (v.x - en.x) / vd * 700 * dt; // pull acceleration
+      en.ky += (v.y - en.y) / vd * 700 * dt;
+      en.hp -= s.dmg * 1.1 * dt;
+      G.dmgDealt += s.dmg * 1.1 * dt;
+      if (en.hp <= 0) killEnemy(en);
+    }
+  }
   if (s.echo) { G.echoT -= dt; if (G.echoT <= 0) { G.echoT = 6; fireVolley(); G.beams.push({ ring: true, x: G.px, y: G.py, r: 40, t: 0, life: 0.2, color: '#8af0ff' }); } }
   if (s.ripple) { G.rippleT -= dt; if (G.rippleT <= 0) { G.rippleT = 12; G.rippleActive = 3; G.beams.push({ ring: true, x: G.px, y: G.py, r: Math.max(W, H), t: 0, life: 0.5, color: '#8affff' }); } }
   if (s.pulse > 0) { // EVENT HORIZON shockwave — wipes every enemy bullet
@@ -1057,6 +1244,8 @@ function update(dt) {
         if (dist2(b.x, b.y, en.x, en.y) < (b.size + en.r) * (b.size + en.r)) {
           if (b.hit && b.hit.includes(en)) continue;
           hitEnemy(en, b.dmg);
+          if (b.mBlast) { blast(b.x, b.y, 46, b.dmg * 0.6); dead = true; break; } // Missiles
+          if (s.boom > 0 && Math.random() < s.boom) blast(b.x, b.y, 46, b.dmg * 0.45); // Explosive Rounds
           if (b.pierce > 0) { b.pierce--; (b.hit || (b.hit = [])).push(en); }
           else { dead = true; break; }
         }
@@ -1065,27 +1254,36 @@ function update(dt) {
     if (dead) { G.pB[i] = G.pB[G.pB.length - 1]; G.pB.pop(); }
   }
 
-  // barrage zones
+  // telegraphed blast zones (barrage + mortar)
   for (let i = G.zones.length - 1; i >= 0; i--) {
     const z = G.zones[i];
     z.t += dt;
     if (z.t >= z.tel) {
-      bomb(z.x, z.y, z.r, s.dmg * 2);
+      bomb(z.x, z.y, z.r, z.dmg || s.dmg * 2);
       G.zones.splice(i, 1);
     }
   }
 
-  // enemy bullets (slowed by slow field / graze / ripple)
+  // enemy bullets (slowed by slow field / graze special / ripple)
   const grazeMult = 1 - s.grazeSlow;
   const rippleMult = G.rippleActive > 0 ? 0.45 : 1;
   for (let i = G.eB.length - 1; i >= 0; i--) {
     const b = G.eB[i];
     b.t += dt;
     let m = grazeMult * rippleMult;
-    if (s.slowR > 0 && dist2(b.x, b.y, G.px, G.py) < s.slowR * s.slowR) m *= 1 - s.slowBullet;
+    const pd2 = dist2(b.x, b.y, G.px, G.py);
+    if (s.slowR > 0 && pd2 < s.slowR * s.slowR) m *= 1 - s.slowBullet;
+    // Graze (Touhou-style): a bullet skimming past grants XP and heats your damage
+    if (s.graze > 0 && !b.grazed && pd2 < s.grazeR * s.grazeR && pd2 > (b.size + s.hitR + 5) * (b.size + s.hitR + 5)) {
+      b.grazed = true;
+      G.xp += 0.2 + 0.1 * s.graze;
+      G.heatT = 3;
+      burst(b.x, b.y, '#ffffff', 1, 60);
+      checkLevel();
+    }
     b.x += b.vx * dt * m; b.y += b.vy * dt * m;
     let dead = b.t >= b.life || b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30;
-    if (!dead && G.iT <= 0 && dist2(b.x, b.y, G.px, G.py) < (b.size + s.hitR) * (b.size + s.hitR)) {
+    if (!dead && G.iT <= 0 && pd2 < (b.size + s.hitR) * (b.size + s.hitR)) {
       hurtPlayer(b.dmg); dead = true;
     }
     if (dead) { G.eB[i] = G.eB[G.eB.length - 1]; G.eB.pop(); }
@@ -1107,7 +1305,7 @@ function update(dt) {
       if (s.gemHeal > 0) G.hp = Math.min(s.maxHp, G.hp + s.gemHeal);
       SFX.gem();
       G.gems.splice(i, 1);
-      while (G.xp >= G.xpNeed) { G.xp -= G.xpNeed; G.level++; G.xpNeed = xpNeed(G.level); G.pendingLevels++; }
+      checkLevel();
     }
   }
   if (G.pendingLevels > 0 && state === ST.PLAY) openLevelUp();
@@ -1169,6 +1367,11 @@ function render() {
     ctx.strokeStyle = 'rgba(130, 240, 255, 0.22)';
     ctx.beginPath(); ctx.arc(G.px, G.py, s.slowR, 0, TAU); ctx.stroke();
   }
+  // graze ring (glows while heat is active)
+  if (s && s.graze > 0) {
+    ctx.strokeStyle = G.heatT > 0 ? 'rgba(255,255,255,.5)' : 'rgba(255,255,255,.16)';
+    ctx.beginPath(); ctx.arc(G.px, G.py, s.grazeR, 0, TAU); ctx.stroke();
+  }
 
   // barrage telegraphs
   for (const z of G.zones) {
@@ -1179,6 +1382,22 @@ function render() {
     ctx.fillStyle = '#ffd24a';
     ctx.beginPath(); ctx.arc(z.x, z.y, z.r * k, 0, TAU); ctx.fill();
     ctx.globalAlpha = 1;
+  }
+
+  // turrets
+  for (const tr of G.turrets) {
+    const fade = tr.t > 7.5 ? 0.35 + 0.65 * Math.abs(Math.sin(tr.t * 8)) : 1;
+    ctx.globalAlpha = fade;
+    ctx.strokeStyle = '#7fe8ff'; ctx.fillStyle = 'rgba(127,232,255,.18)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = TAU * k / 6 + tr.t;
+      if (k === 0) ctx.moveTo(tr.x + Math.cos(a) * 11, tr.y + Math.sin(a) * 11);
+      else ctx.lineTo(tr.x + Math.cos(a) * 11, tr.y + Math.sin(a) * 11);
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
   }
 
   // gems + healing orbs
@@ -1216,9 +1435,47 @@ function render() {
     ctx.lineWidth = en.boss ? 3 : 1.5;
     ctx.stroke();
     ctx.restore();
+    if (en.elite) { // gold elite ring + name
+      ctx.strokeStyle = '#ffd24a';
+      ctx.globalAlpha = 0.55 + 0.35 * Math.sin(en.t * 6);
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(en.x, en.y, en.r + 7, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.lineWidth = 1;
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 11px Segoe UI, sans-serif';
+      ctx.fillStyle = '#ffd24a';
+      ctx.fillText(en.name, en.x, en.y - en.r - 14);
+    }
     if (en.maxHp > 60 && en.hp < en.maxHp && !en.boss) {
       ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(en.x - 16, en.y - en.r - 9, 32, 4);
       ctx.fillStyle = '#ff5a6b'; ctx.fillRect(en.x - 16, en.y - en.r - 9, 32 * clamp(en.hp / en.maxHp, 0, 1), 4);
+    }
+  }
+
+  // vortex rifts
+  for (const v of G.vortices) {
+    const k = v.t / v.dur;
+    ctx.strokeStyle = '#c08aff';
+    ctx.globalAlpha = 0.7 * (1 - k * 0.5);
+    ctx.lineWidth = 2.5;
+    for (let ring = 0; ring < 3; ring++) {
+      const rr = (170 - ring * 48) * (1 - k * 0.35);
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, Math.max(6, rr), v.t * 5 + ring, v.t * 5 + ring + TAU * 0.7);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  }
+
+  // drones (Gradius-style options)
+  if (s && s.drones > 0) {
+    ctx.fillStyle = '#a8d8ff';
+    for (let i = 0; i < s.drones; i++) {
+      const p = dronePos(i, s.drones);
+      ctx.save(); ctx.translate(p.x, p.y);
+      ctx.rotate(Math.atan2(G.faceY, G.faceX) + Math.PI / 2);
+      ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill();
+      ctx.restore();
     }
   }
 
@@ -1355,7 +1612,8 @@ function updateHUD() {
 }
 
 function unitChipText(u) {
-  if (u.kind === 'family') return `${FAMILIES[u.key].name} ${u.level}`;
+  // ⚡ marks fusion fuel: Lv2 is one pick away, Lv3+ is ready and waiting
+  if (u.kind === 'family') return `${FAMILIES[u.key].name} ${u.level}${u.level >= 3 ? ' ⚡rdy' : u.level === 2 ? ' ⚡' : ''}`;
   if (u.kind === 'primordial') return `🜏 ${PRIMORDIALS[u.key].name} Lv${u.level}`;
   return `${'★'.repeat(Math.min(u.stars, 5))}${u.stars > 5 ? '×' + u.stars : ''} ${u.name} Lv${u.level}`;
 }
@@ -1406,7 +1664,7 @@ function buildRecapHTML() {
 function die() {
   state = ST.DEAD;
   bestWave = Math.max(bestWave, G.wave);
-  if (store) try { store.setItem('myriad.bestWave', String(bestWave)); } catch (e) {}
+  if (store) try { store.setItem('spacesouls.bestWave', String(bestWave)); } catch (e) {}
   $('deadStats').innerHTML = `
     <div class="sub">Survived to <b>Wave ${G.wave}</b> (best: ${bestWave}) · <b>${fmt(G.kills)}</b> kills ·
     Level <b>${G.level}</b> · <b>${G.fusions}</b> auto-fusions · ${fmt(Math.round(G.dmgDealt))} damage dealt</div>
@@ -1502,7 +1760,8 @@ window.__GAME__ = {
   levelUnit(i, n) { const u = G.units[i]; for (let k = 0; k < (n || 1); k++) applyCard({ type: 'level', u }); return u; },
   forceLevelUp() { G.pendingLevels++; },
   hurt(d) { hurtPlayer(d); },
-  fireVolley,
+  fireVolley, spawnElite,
+  kill(en) { killEnemy(en); },
   get world() { return { W, H, zoom: ZOOM }; },
   unitSummary, autoFuse, makeFamilyUnit,
 };
