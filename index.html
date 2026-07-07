@@ -26,8 +26,11 @@
   .hudTop { position: absolute; top: 10px; left: 12px; right: 12px; display: flex;
     gap: 14px; align-items: center; font-size: 13px; text-shadow: 0 1px 3px #000; }
   .bar { height: 12px; border: 1px solid var(--line); border-radius: 6px;
-    background: rgba(0,0,0,.55); overflow: hidden; }
+    background: rgba(0,0,0,.55); overflow: hidden; position: relative; }
   .bar > i { display: block; height: 100%; width: 0%; transition: width .12s; }
+  .bar .num { position: absolute; inset: 0; text-align: center; font-size: 9.5px;
+    line-height: 11px; font-weight: 600; color: #fff; text-shadow: 0 1px 2px #000, 0 0 3px #000;
+    letter-spacing: .5px; pointer-events: none; }
   #hpBar { width: 220px; } #hpBar > i { background: linear-gradient(90deg, #ff3a6b, #ff7a4a); }
   #xpBar { flex: 1; } #xpBar > i { background: linear-gradient(90deg, #2a9a5a, #54d68a); }
   .stat { color: var(--dim); white-space: nowrap; } .stat b { color: var(--ink); font-weight: 600; }
@@ -140,10 +143,10 @@
 
   <div id="hud">
     <div class="hudTop">
-      <div class="stat">HP</div><div class="bar" id="hpBar"><i></i></div>
+      <div class="stat">HP</div><div class="bar" id="hpBar"><i></i><span class="num" id="hpNum"></span></div>
       <div class="stat" id="shieldNum"></div>
       <div class="stat">Lv <b id="lvNum">1</b></div>
-      <div class="bar" id="xpBar"><i></i></div>
+      <div class="bar" id="xpBar"><i></i><span class="num" id="xpNum"></span></div>
       <div class="stat">Wave <b id="waveNum">1</b></div>
       <div class="stat hideMobile">Kills <b id="killNum">0</b></div>
       <div class="stat hideMobile">Best <b id="bestNum">0</b></div>

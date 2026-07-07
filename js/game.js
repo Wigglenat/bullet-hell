@@ -39,6 +39,7 @@ const dist2 = (ax, ay, bx, by) => { const dx = ax - bx, dy = ay - by; return dx 
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 const fmt = (n) => n.toLocaleString('en-US');
+const fmtShort = (n) => n >= 10000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(Math.round(n));
 
 // ---------------------------------------------------------------------------
 // Sprites — pre-rendered glow dots
@@ -188,6 +189,7 @@ function newRun() {
     gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18, bombT: 0,
     rippleActive: 0, bladeCd: [], rampStart: null, rampMult: 1, pulseT: 0, rebirthT: 0, adrenT: 0,
     missileT: 2, mortarT: 2.5, turretT: 3, vortexT: 4, heatT: 0,
+    healAcc: 0, healT: 0, xpAcc: 0, xpT: 0,
     eliteT: 20, eliteSpoils: 0,
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
     turrets: [], vortices: [],
@@ -1410,6 +1412,7 @@ function hurtPlayer(dmg) {
 function update(dt) {
   G.time += dt;
   const s = G.stats;
+  const hpAtStart = G.hp;
   // GENESIS ENGINE ramp — +1%/s (per level) since the relic was acquired
   G.rampMult = s.ramp > 0 && G.rampStart !== null ? 1 + s.ramp * Math.max(0, G.time - G.rampStart) : 1;
   if (G.rebirthT > 0) G.rebirthT -= dt;
@@ -1631,6 +1634,7 @@ function update(dt) {
     if (s.graze > 0 && !b.grazed && pd2 < s.grazeR * s.grazeR && pd2 > (b.size + s.hitR + 5) * (b.size + s.hitR + 5)) {
       b.grazed = true;
       G.xp += 0.2 + 0.1 * s.graze;
+      G.xpAcc += 0.2 + 0.1 * s.graze;
       G.heatT = 3;
       burst(b.x, b.y, '#ffffff', 1, 60);
       checkLevel();
@@ -1655,7 +1659,7 @@ function update(dt) {
     }
     if (d2 < 20 * 20) {
       if (g.heal) G.hp = Math.min(s.maxHp, G.hp + g.heal); // Scavenger healing orb
-      else G.xp += g.v * s.xpMult;                          // Greed multiplies gem value
+      else { G.xp += g.v * s.xpMult; G.xpAcc += g.v * s.xpMult; } // Greed multiplies gem value
       if (s.gemHeal > 0) G.hp = Math.min(s.maxHp, G.hp + s.gemHeal);
       SFX.gem();
       G.gems.splice(i, 1);
@@ -1691,6 +1695,28 @@ function update(dt) {
     if ((G.beams[i].t += dt) >= G.beams[i].life) G.beams.splice(i, 1);
   }
   if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30);
+
+  // gain ticks — "+HP" / "+XP" floaters so increases are visible
+  const hpDelta = G.hp - hpAtStart;
+  if (hpDelta > 0) G.healAcc += hpDelta;
+  G.healT += dt;
+  if (G.healT >= 0.6) {
+    G.healT = 0;
+    if (G.healAcc >= 1) {
+      G.floats.push({ x: G.px - 26, y: G.py - 20, txt: '+' + fmtShort(G.healAcc) + ' HP', color: '#54d68a', t: 0, life: 0.9, small: true });
+      if (G.floats.length > 24) G.floats.shift();
+    }
+    G.healAcc = 0;
+  }
+  G.xpT += dt;
+  if (G.xpT >= 0.8) {
+    G.xpT = 0;
+    if (G.xpAcc >= 1) {
+      G.floats.push({ x: G.px + 26, y: G.py - 20, txt: '+' + fmtShort(G.xpAcc) + ' XP', color: '#8ae8ff', t: 0, life: 0.9, small: true });
+      if (G.floats.length > 24) G.floats.shift();
+    }
+    G.xpAcc = 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1952,9 +1978,9 @@ function render() {
 
   // announcements
   ctx.textAlign = 'center';
-  ctx.font = 'bold 16px Segoe UI, sans-serif';
   for (const f of G.floats) {
     ctx.globalAlpha = clamp(1 - f.t / f.life, 0, 1);
+    ctx.font = f.small ? 'bold 12px Segoe UI, sans-serif' : 'bold 16px Segoe UI, sans-serif';
     ctx.fillStyle = f.color;
     ctx.fillText(f.txt, f.x, f.y);
   }
@@ -1992,6 +2018,8 @@ function updateHUD() {
   const s = G.stats;
   $('hpBar').firstElementChild.style.width = clamp(G.hp / s.maxHp * 100, 0, 100) + '%';
   $('xpBar').firstElementChild.style.width = clamp(G.xp / G.xpNeed * 100, 0, 100) + '%';
+  $('hpNum').textContent = fmtShort(Math.max(0, Math.ceil(G.hp))) + ' / ' + fmtShort(s.maxHp);
+  $('xpNum').textContent = fmtShort(Math.floor(G.xp)) + ' / ' + fmtShort(G.xpNeed);
   $('lvNum').textContent = G.level;
   $('waveNum').textContent = (G.ngPlus ? 'NG+' + G.ngPlus + ' ' : '') + G.sector + '-' + G.wave;
   $('killNum').textContent = fmt(G.kills);
