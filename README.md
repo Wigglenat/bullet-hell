@@ -55,6 +55,20 @@ Kill it and the sector is cleared: half your HP back, a **SECTOR SPOILS** draw
 with double levels and **1.01% Primordial odds** (base 0.01% + a flat 1%), and
 Sector N+1 begins at wave 1 with difficulty carrying over.
 
+### The Warden hierarchy
+
+| Total wave | Boss | Crazy abilities | Spoils |
+|---|---|---|---|
+| every 100 | **SECTOR WARDEN** | sidestep-dodges your shots (3, then exhausted), range-adaptive patterns, enrage | 1 draw · 1.01% Primordial |
+| every 1,000 | **GALAXY WARDEN** | **blinks** (teleports) out of your fire, **splits phantom clones** at ⅔ and ⅓ HP, **inhales** — eats your bullets while dragging you in | 2 draws · 2.01% |
+| every 10,000 | **UNIVERSE WARDEN** | all of the above + **armored face / glowing weak point on its back** (25% / 150% damage), an **echo of your own ship** hunting you, and a REALIGNMENT pulse that re-aims every bullet on screen at you | 3 draws · 5.01% + **one guaranteed Primordial** |
+| wave 100,000 | **THE LAST SOUL — END OF ALL THINGS** | everything at once, plus desperation bullet-walls with escape gaps below 15% HP | 3 draws of **pure Primordial** |
+
+Beat THE LAST SOUL and the run doesn't end — it begins again: **NG+**. You keep
+your entire build (every fusion, star, essence, and relic); the universe
+restarts at Sector 1 with enemy scaling multiplied. The HUD wears your NG+
+badge. There is no top.
+
 ## 🜏 Primordial — the 0.01% tier
 
 Above Mythic sits **Primordial**: not craftable, not fusable. Every level-up

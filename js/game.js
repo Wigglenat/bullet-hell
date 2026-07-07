@@ -179,7 +179,7 @@ let bestWave = +((store && (store.getItem('spacesouls.bestWave') || store.getIte
 const G = {};
 function newRun() {
   Object.assign(G, {
-    time: 0, wave: 1, waveT: 0, sector: 1, superSpoils: 0, kills: 0, fusions: 0, dmgDealt: 0,
+    time: 0, wave: 1, waveT: 0, sector: 1, spoilsQueue: [], ngPlus: 0, kills: 0, fusions: 0, dmgDealt: 0,
     level: 1, xp: 0, xpNeed: xpNeed(1), pendingLevels: 0,
     px: W / 2, py: H * 0.7, pr: 3.5, hp: 100, iT: 0, focus: false,
     faceX: 0, faceY: -1, shake: 0, phoenixUsed: false,
@@ -506,29 +506,34 @@ function openLevelUp() {
   state = ST.LEVELUP;
   G.pendingLevels--;
   SFX.level();
-  let spoils = null; // 'sector' outranks 'elite'
-  if (G.superSpoils > 0) { G.superSpoils--; spoils = 'sector'; }
+  let spoils = null; // warden spoils outrank elite spoils
+  if (G.spoilsQueue.length) spoils = G.spoilsQueue.shift();
   else if (G.eliteSpoils > 0) { G.eliteSpoils--; spoils = 'elite'; }
+  const SPOILS_INFO = {
+    sector:   { chance: PRIMORDIAL_CHANCE + 0.01, force: 0, label: '⚔ SECTOR SPOILS — DOUBLE levels · Primordial odds 1.01% (0.01% + 1%)' },
+    galaxy:   { chance: PRIMORDIAL_CHANCE + 0.02, force: 0, label: '⚔ GALAXY SPOILS — DOUBLE levels · Primordial odds 2.01%' },
+    universe: { chance: PRIMORDIAL_CHANCE + 0.05, force: 1, label: '⚔ UNIVERSE SPOILS — DOUBLE levels · 5.01% + one GUARANTEED Primordial' },
+    final:    { chance: 1,                        force: 3, label: '☠ THE LAST SPOILS — pure Primordial' },
+    elite:    { chance: PRIMORDIAL_CHANCE * 50,   force: 0, label: '★ ELITE SPOILS — cards grant DOUBLE levels · Primordial odds ×50' },
+  };
+  const SP = spoils ? SPOILS_INFO[spoils] : null;
   const subEl = document.querySelector('#ovLevel .sub');
-  if (subEl) subEl.textContent = spoils === 'sector'
-    ? '⚔ SECTOR SPOILS — DOUBLE levels · Primordial odds 1.01% (0.01% + 1%)'
-    : spoils === 'elite'
-      ? '★ ELITE SPOILS — cards grant DOUBLE levels · Primordial odds ×50'
-      : 'Choose one.';
+  if (subEl) subEl.textContent = SP ? SP.label : 'Choose one.';
   const wrap = document.getElementById('cards');
   wrap.innerHTML = '';
   const cards = drawCards(3, !!spoils);
-  // PRIMORDIAL roll — 0.01% base; ×50 on elite spoils; +1% flat from the Warden
-  const primChance = spoils === 'sector' ? PRIMORDIAL_CHANCE + 0.01
-    : spoils === 'elite' ? PRIMORDIAL_CHANCE * 50 : PRIMORDIAL_CHANCE;
-  for (let i = 0; i < cards.length; i++) {
-    if (Math.random() >= primChance) continue;
+  // PRIMORDIAL roll — 0.01% base, boosted by spoils tier
+  const primChance = SP ? SP.chance : PRIMORDIAL_CHANCE;
+  function primCard() {
     const unowned = PRIMORDIAL_KEYS.filter(k => !G.units.some(u => u.kind === 'primordial' && u.key === k));
-    if (unowned.length) cards[i] = { type: 'primordial', key: unowned[(Math.random() * unowned.length) | 0] };
-    else {
-      const owned = G.units.filter(u => u.kind === 'primordial');
-      cards[i] = { type: 'level', u: owned[(Math.random() * owned.length) | 0] };
-    }
+    if (unowned.length) return { type: 'primordial', key: unowned[(Math.random() * unowned.length) | 0] };
+    const owned = G.units.filter(u => u.kind === 'primordial');
+    return { type: 'level', u: owned[(Math.random() * owned.length) | 0] };
+  }
+  for (let i = 0; i < cards.length; i++) {
+    if (SP && i < SP.force) { cards[i] = primCard(); continue; } // guaranteed slots
+    if (Math.random() >= primChance) continue;
+    cards[i] = primCard();
   }
   for (const card of cards) {
     const info = cardHTML(card);
@@ -750,28 +755,41 @@ function killEnemy(en) {
   SFX.kill();
   burst(en.x, en.y, en.color, en.boss ? 50 : 6, en.boss ? 380 : 150);
   const s = G.stats;
-  const gems = en.superBoss ? 40 : en.boss ? 30 : en.elite ? 8 : 1;
+  const gems = en.superBoss ? 40 : en.phantom ? 3 : en.boss ? 30 : en.elite ? 8 : 1;
   for (let i = 0; i < gems; i++) {
     poolPush(G.gems, CAP.gems, { x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp / gems)), t: 0 });
   }
-  if (en.superBoss) { // sector cleared: spoils at 1.01% Primordial, next sector begins
-    G.superSpoils++;
-    G.pendingLevels++;
+  if (en.superBoss) { // a Warden falls
+    const tier = en.wtier || 'sector';
+    const T = WARDEN_TIERS[tier];
+    for (let k = 0; k < T.spoils; k++) { G.spoilsQueue.push(tier); G.pendingLevels++; }
     const cleared = G.sector;
-    G.sector++;
-    G.wave = 1;
-    G.waveT = 0;
     G.eliteT = 20;
     G.eB.length = 0;
-    G.hp = Math.min(s.maxHp, G.hp + s.maxHp * 0.5);
     G.bossAlive = null;
     document.getElementById('bossBar').classList.remove('on');
-    G.shake = Math.max(G.shake, 16);
-    burst(en.x, en.y, '#ff5f6d', 90, 460);
-    G.bannerQ.push({
-      title: '⚔ SECTOR ' + cleared + ' CLEARED',
-      subtitle: (en.name || 'The Warden') + ' falls — spoils at 1.01% Primordial odds · Sector ' + G.sector + ' begins',
-    });
+    G.shake = Math.max(G.shake, 18);
+    burst(en.x, en.y, T.color, 110, 500);
+    // clear leftover phantoms/echoes
+    for (const e of G.enemies) if (e.phantom && e !== en) e.hp = 0;
+    if (tier === 'final') { // NEW GAME + — the cycle continues with your whole build
+      G.ngPlus++;
+      G.sector = 1; G.wave = 1; G.waveT = 0;
+      G.hp = s.maxHp;
+      G.bannerQ.push({
+        title: '☠ THE LAST SOUL FALLS — NG+' + G.ngPlus,
+        subtitle: 'The cycle begins anew. Your arsenal endures — the universe grows crueler.',
+      });
+    } else {
+      G.sector++; G.wave = 1; G.waveT = 0;
+      G.hp = Math.min(s.maxHp, G.hp + s.maxHp * 0.5);
+      G.bannerQ.push({
+        title: tier === 'universe' ? '⚔ THE UNIVERSE YIELDS — SECTOR ' + cleared + ' CLEARED'
+          : tier === 'galaxy' ? '⚔ GALAXY BROKEN — SECTOR ' + cleared + ' CLEARED'
+          : '⚔ SECTOR ' + cleared + ' CLEARED',
+        subtitle: (en.name || 'The Warden') + ' falls — ' + T.spoils + ' spoils draw' + (T.spoils > 1 ? 's' : '') + ' · Sector ' + G.sector + ' begins',
+      });
+    }
     if (G.bannerQ.length > 6) G.bannerQ.shift();
     SFX.mythic();
   } else if (en.elite) { // spoils: a bonus draw with double levels and 50× Primordial odds
@@ -827,11 +845,12 @@ const ETYPES = {
   charger:  { hp: 20,  speed: 62,  r: 13, dmg: 15, color: '#c8ff5a', xp: 2 },
   boss:     { hp: 800, speed: 40,  r: 42, dmg: 22, color: '#ff2a8a', xp: 45 },
   superboss:{ hp: 1800,speed: 58,  r: 54, dmg: 24, color: '#ff5f6d', xp: 120 },
+  echo:     { hp: 260, speed: 210, r: 12, dmg: 16, color: '#454a68', xp: 8 },
 };
 // 100 waves per sector; difficulty scales with the TOTAL wave count
 function totalWave() { return (G.sector - 1) * 100 + G.wave; }
 // gentler curve than before: wave 10 ≈ 5.4× (was 7.5×), wave 20 ≈ 14× (was 21×)
-function waveScale() { const w = totalWave(); return 1 + w * 0.22 + w * w * 0.022; }
+function waveScale() { const w = totalWave(); return (1 + w * 0.22 + w * w * 0.022) * (1 + (G.ngPlus || 0) * 1.5); }
 
 const SHOOT_TYPES = new Set(['shooter', 'spinner', 'tank']);
 function shooterCount() {
@@ -848,7 +867,7 @@ function spawnEnemy(type, x, y, hpMult) {
   const jHp = boss ? 1 : rand(0.85, 1.15), jSp = boss ? 1 : rand(0.9, 1.15), jR = boss ? 1 : rand(0.92, 1.12);
   const en = {
     type, x, y, r: T.r * jR, hp: T.hp * sc * (hpMult || 1) * jHp, maxHp: T.hp * sc * (hpMult || 1) * jHp,
-    speed: T.speed * (1 + totalWave() * 0.008) * jSp, dmg: T.dmg * (1 + totalWave() * 0.035),
+    speed: T.speed * (1 + totalWave() * 0.008) * jSp, dmg: T.dmg * (1 + totalWave() * 0.035) * (1 + (G.ngPlus || 0) * 0.75),
     color: T.color, xp: T.xp, t: rand(0, 9), shootT: rand(1.2, 2.6),
     boss, dashT: 0, dvx: 0, dvy: 0, ang: Math.random() * TAU,
     dead: false, flash: 0, kx: 0, ky: 0, chillT: 0, chillF: 0, ramCd: 0, elite: false,
@@ -960,6 +979,25 @@ function updateWave(dt) {
 // sector and grants a spoils draw at 1.01% Primordial odds (0.01% + 1%).
 // ---------------------------------------------------------------------------
 const SUPER_NAMES = ['APOPHIS', 'TYPHON', 'SURTR', 'NIDHOGG', 'KHARYBDIS', 'ABADDON', 'FAFNIR', 'AZHDAHA'];
+const GALAXY_NAMES = ['ANDROMEDA', 'MAELSTROM', 'HELIX', 'TRIANGULUM', 'CYGNUS X', 'MAGELLAN'];
+const UNIVERSE_NAMES = ['THE AXIOM', 'ETERNITY', 'FIRMAMENT', 'THE DEEP', 'OMEGA POINT'];
+
+// Warden hierarchy: sector (every 100 waves) < galaxy (1,000) < universe
+// (10,000) < THE LAST SOUL (100,000 — beat it for NG+ with your whole build).
+const WARDEN_TIERS = {
+  sector:   { hpMult: 1,  r: 54, color: '#ff5f6d', stamina: 3, spoils: 1, blink: false, clones: false, eater: false, weakpoint: false, echo: false, reaim: false, storm: false },
+  galaxy:   { hpMult: 4,  r: 64, color: '#b06bff', stamina: 4, spoils: 2, blink: true,  clones: true,  eater: true,  weakpoint: false, echo: false, reaim: false, storm: false },
+  universe: { hpMult: 16, r: 76, color: '#9ff0ff', stamina: 5, spoils: 3, blink: true,  clones: true,  eater: true,  weakpoint: true,  echo: true,  reaim: true,  storm: false },
+  final:    { hpMult: 64, r: 92, color: '#ffffff', stamina: 6, spoils: 3, blink: true,  clones: true,  eater: true,  weakpoint: true,  echo: true,  reaim: true,  storm: true },
+};
+
+function wardenTier() {
+  const tw = totalWave();
+  if (tw >= 100000) return 'final';
+  if (tw % 10000 === 0) return 'universe';
+  if (tw % 1000 === 0) return 'galaxy';
+  return 'sector';
+}
 
 function startSuperBoss() {
   G.wave = 100;
@@ -967,21 +1005,49 @@ function startSuperBoss() {
   for (const en of G.enemies) if (!en.boss) burst(en.x, en.y, en.color, 3, 140);
   G.enemies.length = 0; // the arena empties — the Warden comes alone
   G.eB.length = 0;
+  const tier = wardenTier();
+  const T = WARDEN_TIERS[tier];
   const p = edgeSpawnPos();
-  const en = spawnEnemy('superboss', p.x, p.y, 1 + (G.sector - 1) * 0.8);
+  const en = spawnEnemy('superboss', p.x, p.y, (1 + (G.sector - 1) * 0.8) * T.hpMult);
   if (!en) return;
   en.boss = true; // boss-grade immunities (knockback/cull/pull)
   en.superBoss = true;
-  en.name = pick(SUPER_NAMES) + ' — WARDEN OF SECTOR ' + G.sector;
-  en.xp = 120 + totalWave() * 2;
-  en.stamina = 3; en.dodgeCd = 0; en.tiredT = 0; en.dodgeCount = 0;
+  en.wtier = tier;
+  en.r = T.r;
+  en.color = T.color;
+  en.weakpoint = T.weakpoint;
+  en.name = tier === 'final' ? 'THE LAST SOUL — END OF ALL THINGS'
+    : tier === 'universe' ? pick(UNIVERSE_NAMES) + ' — UNIVERSE WARDEN'
+    : tier === 'galaxy' ? pick(GALAXY_NAMES) + ' — GALAXY WARDEN'
+    : pick(SUPER_NAMES) + ' — WARDEN OF SECTOR ' + G.sector;
+  en.xp = 120 * T.hpMult + totalWave() * 2;
+  en.stamina = T.stamina; en.dodgeCd = 0; en.tiredT = 0; en.dodgeCount = 0;
+  en.cloneStage = 0; en.eaterT = 9; en.eaterActive = 0; en.reaimT = 12; en.reaimWarned = false;
+  en.echoT = 1; en.stormT = 2.5;
   G.bossAlive = en;
   document.getElementById('bossName').textContent = '― ' + en.name + ' ―';
   document.getElementById('bossBar').classList.add('on');
-  announce('⚠ THE WARDEN COMES ALONE', '#ff5f6d');
-  G.shake = Math.max(G.shake, 10);
+  announce(tier === 'final' ? '☠ THE LAST SOUL AWAKENS'
+    : tier === 'universe' ? '⚠⚠⚠ THE UNIVERSE ITSELF ANSWERS'
+    : tier === 'galaxy' ? '⚠⚠ A GALAXY WARDEN DESCENDS'
+    : '⚠ THE WARDEN COMES ALONE', T.color);
+  G.shake = Math.max(G.shake, 12);
   SFX.mythic();
   return en;
+}
+
+function spawnPhantom(en) {
+  const keep = G.bossAlive;
+  const c = spawnEnemy('boss', en.x + rand(-90, 90), en.y + rand(-90, 90), 0.001);
+  G.bossAlive = keep;
+  if (keep) document.getElementById('bossName').textContent = '― ' + keep.name + ' ―';
+  if (!c) return;
+  c.phantom = true;
+  c.boss = false;
+  c.color = '#b06bff';
+  c.hp = c.maxHp = en.maxHp * 0.08;
+  c.r = 30;
+  c.xp = 10;
 }
 
 function slowFactorAt(x, y) {
@@ -1069,11 +1135,31 @@ function updateEnemy(en, dt) {
       en.dvx *= 0.96; en.dvy *= 0.96;
       en.x += en.dvx * dt * slowFactorAt(en.x, en.y); en.y += en.dvy * dt * slowFactorAt(en.x, en.y);
       break;
+    case 'echo': { // your dark twin: orbits you, fires player-like fans
+      const orbitR = 250;
+      const tx = -dy / d, ty = dx / d; // tangential drift
+      const rad = d > orbitR + 40 ? 1 : d < orbitR - 40 ? -0.8 : 0;
+      let vx = dx / d * rad + tx * 0.85, vy = dy / d * rad + ty * 0.85;
+      const vm = Math.hypot(vx, vy) || 1;
+      en.x += vx / vm * sp * dt; en.y += vy / vm * sp * dt;
+      en.shootT -= dt;
+      if (en.shootT <= 0) {
+        en.shootT = 1.2;
+        const a0 = Math.atan2(dy, dx);
+        for (let i = -1; i <= 1; i++) {
+          const a = a0 + i * 0.14;
+          spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 210, vy: Math.sin(a) * 210, dmg: en.dmg, size: 5 });
+        }
+      }
+      break;
+    }
     case 'superboss': {
       // stamina / exhaustion cycle
       if (en.dodgeCd > 0) en.dodgeCd -= dt;
       if (en.tiredT > 0) { en.tiredT -= dt; if (en.tiredT <= 0) en.stamina = 3; }
-      // REACTIVE DODGE — reads your bullets and sidesteps converging fire
+      const WT = WARDEN_TIERS[en.wtier || 'sector'];
+      // REACTIVE DODGE — reads your bullets; sector Wardens sidestep, higher
+      // tiers BLINK (teleport) out of the line of fire entirely
       if (en.dodgeCd <= 0 && en.tiredT <= 0 && en.stamina > 0) {
         for (const b of G.pB) {
           const bdx = en.x - b.x, bdy = en.y - b.y;
@@ -1082,13 +1168,22 @@ function updateEnemy(en, dt) {
           const bv = Math.hypot(b.vx, b.vy);
           if (bv < 40) continue;
           if ((b.vx * bdx + b.vy * bdy) / (bv * bd) > 0.92) { // heading straight at it
-            const side = Math.random() < 0.5 ? 1 : -1;
-            en.dvx = -b.vy / bv * 660 * side;
-            en.dvy = b.vx / bv * 660 * side;
             en.stamina--;
             en.dodgeCount = (en.dodgeCount || 0) + 1;
-            en.dodgeCd = 1.1;
-            burst(en.x, en.y, '#ffffff', 8, 220);
+            if (WT.blink) { // teleport to a fresh angle at mid range
+              burst(en.x, en.y, en.color, 16, 300);
+              const a = Math.random() * TAU;
+              en.x = clamp(G.px + Math.cos(a) * 330, 60, W - 60);
+              en.y = clamp(G.py + Math.sin(a) * 330, 60, H - 60);
+              burst(en.x, en.y, en.color, 16, 300);
+              en.dodgeCd = 1.6;
+            } else {
+              const side = Math.random() < 0.5 ? 1 : -1;
+              en.dvx = -b.vy / bv * 660 * side;
+              en.dvy = b.vx / bv * 660 * side;
+              en.dodgeCd = 1.1;
+              burst(en.x, en.y, '#ffffff', 8, 220);
+            }
             if (en.stamina <= 0) { en.tiredT = 4; announce('THE WARDEN TIRES — STRIKE NOW', '#ffd24a'); }
             break;
           }
@@ -1096,6 +1191,80 @@ function updateEnemy(en, dt) {
       }
       en.x += en.dvx * dt; en.y += en.dvy * dt;
       en.dvx *= Math.pow(0.03, dt); en.dvy *= Math.pow(0.03, dt);
+      // PHANTOM CLONES at 2/3 and 1/3 HP (galaxy+)
+      if (WT.clones) {
+        const frac = en.hp / en.maxHp;
+        if (en.cloneStage === 0 && frac < 0.66) { en.cloneStage = 1; spawnPhantom(en); spawnPhantom(en); announce('IT SPLITS', en.color); }
+        else if (en.cloneStage === 1 && frac < 0.33) { en.cloneStage = 2; spawnPhantom(en); spawnPhantom(en); announce('IT SPLITS AGAIN', en.color); }
+      }
+      // BULLET EATER (galaxy+): inhales your bullets and drags you closer
+      if (WT.eater) {
+        if (en.eaterActive > 0) {
+          en.eaterActive -= dt;
+          for (let bi = G.pB.length - 1; bi >= 0; bi--) {
+            const b = G.pB[bi];
+            if (dist2(b.x, b.y, en.x, en.y) < 260 * 260) {
+              burst(b.x, b.y, en.color, 1, 60);
+              G.pB[bi] = G.pB[G.pB.length - 1]; G.pB.pop();
+            }
+          }
+          const pd = Math.hypot(en.x - G.px, en.y - G.py) || 1;
+          G.px += (en.x - G.px) / pd * 85 * dt; // gravity well — fight the pull
+          G.py += (en.y - G.py) / pd * 85 * dt;
+        } else {
+          en.eaterT -= dt;
+          if (en.eaterT <= 0) { en.eaterT = 9; en.eaterActive = 1.6; announce('IT INHALES', en.color); }
+        }
+      }
+      // ECHO OF YOU (universe+): a dark copy of your ship hunts you
+      if (WT.echo) {
+        en.echoT -= dt;
+        if (en.echoT <= 0) {
+          en.echoT = 20;
+          if (!G.enemies.some(e => e.type === 'echo')) {
+            const c = spawnEnemy('echo', en.x, en.y, 1);
+            if (c) { c.phantom = true; announce('IT WEARS YOUR FACE', '#9ff0ff'); }
+          }
+        }
+      }
+      // REALIGNMENT (universe+): warning ring, then every bullet re-aims at you
+      if (WT.reaim) {
+        en.reaimT -= dt;
+        if (en.reaimT <= 0.8 && !en.reaimWarned) {
+          en.reaimWarned = true;
+          G.beams.push({ ring: true, x: en.x, y: en.y, r: 300, t: 0, life: 0.8, color: '#ffd24a' });
+          announce('!! REALIGNMENT', '#ffd24a');
+        }
+        if (en.reaimT <= 0) {
+          en.reaimT = 12; en.reaimWarned = false;
+          for (const b of G.eB) {
+            const spd2 = Math.hypot(b.vx, b.vy) || 1;
+            const rd = Math.hypot(G.px - b.x, G.py - b.y) || 1;
+            b.vx = (G.px - b.x) / rd * spd2; b.vy = (G.py - b.y) / rd * spd2;
+          }
+          G.shake = Math.max(G.shake, 6);
+        }
+      }
+      // DESPERATION STORM (final, below 15% HP): edge walls with gaps
+      if (WT.storm && en.hp < en.maxHp * 0.15) {
+        en.stormT -= dt;
+        if (en.stormT <= 0) {
+          en.stormT = 2.5;
+          const vert = Math.random() < 0.5;
+          const len = vert ? H : W;
+          const g1 = rand(0.1, 0.45) * len, g2 = rand(0.55, 0.9) * len, gap = 95;
+          const fromStart = Math.random() < 0.5;
+          for (let q = 0; q < len; q += 26) {
+            if (Math.abs(q - g1) < gap || Math.abs(q - g2) < gap) continue;
+            const bx = vert ? (fromStart ? -20 : W + 20) : q;
+            const by = vert ? q : (fromStart ? -20 : H + 20);
+            const vx = vert ? (fromStart ? 150 : -150) : 0;
+            const vy = vert ? 0 : (fromStart ? 150 : -150);
+            spawnEB({ x: bx, y: by, vx, vy, dmg: en.dmg, size: 5, life: 14 });
+          }
+          announce('THE WALLS CLOSE IN', '#ffffff');
+        }
+      }
       // hold mid range: close in when far, back off when crowded
       if (d > 340) { en.x += dx / d * sp * dt; en.y += dy / d * sp * dt; }
       else if (d < 200) { en.x -= dx / d * sp * 0.8 * dt; en.y -= dy / d * sp * 0.8 * dt; }
@@ -1420,7 +1589,15 @@ function update(dt) {
         if (en.hp <= 0) continue;
         if (dist2(b.x, b.y, en.x, en.y) < (b.size + en.r) * (b.size + en.r)) {
           if (b.hit && b.hit.includes(en)) continue;
-          hitEnemy(en, b.dmg);
+          let dmgMod = 1;
+          if (en.weakpoint) { // Universe+ Wardens: armored face, glowing back
+            const fd = Math.hypot(G.px - en.x, G.py - en.y) || 1;
+            const fx = (G.px - en.x) / fd, fy = (G.py - en.y) / fd;
+            const bvm = Math.hypot(b.vx, b.vy) || 1;
+            const dot = (b.vx * fx + b.vy * fy) / bvm;
+            dmgMod = dot < -0.25 ? 0.25 : dot > 0.25 ? 1.5 : 1;
+          }
+          hitEnemy(en, b.dmg * dmgMod);
           if (b.mBlast) { blast(b.x, b.y, 46, b.dmg * 0.6); dead = true; break; } // Missiles
           if (s.boom > 0 && Math.random() < s.boom) blast(b.x, b.y, 46, b.dmg * 0.45); // Explosive Rounds
           if (b.pierce > 0) { b.pierce--; (b.hit || (b.hit = [])).push(en); }
@@ -1595,7 +1772,7 @@ function render() {
     ctx.save();
     ctx.translate(en.x, en.y);
     ctx.rotate(en.t * (en.boss ? 0.5 : 1.2));
-    const sides = { chaser: 3, shooter: 4, spinner: 5, tank: 6, darter: 3, splitter: 8, weaver: 4, brute: 5, charger: 3, boss: 7, superboss: 9 }[en.type] || 4;
+    const sides = { chaser: 3, shooter: 4, spinner: 5, tank: 6, darter: 3, splitter: 8, weaver: 4, brute: 5, charger: 3, boss: 7, superboss: 9, echo: 3 }[en.type] || 4;
     ctx.beginPath();
     for (let i = 0; i < sides; i++) {
       const a = TAU * i / sides;
@@ -1612,9 +1789,10 @@ function render() {
     ctx.lineWidth = en.boss ? 3 : 1.5;
     ctx.stroke();
     ctx.restore();
-    if (en.superBoss) { // Warden aura: crimson ring; gold when exhausted (punish window)
+    if (en.superBoss) { // Warden aura: tier ring; gold when exhausted (punish window)
       const tired = en.tiredT > 0;
-      ctx.strokeStyle = tired ? '#ffd24a' : '#ff5f6d';
+      const ringCol = en.wtier === 'final' ? `hsl(${(G.time * 90) % 360}, 100%, 70%)` : en.color;
+      ctx.strokeStyle = tired ? '#ffd24a' : ringCol;
       ctx.globalAlpha = tired ? 0.8 : 0.45 + 0.3 * Math.sin(en.t * 5);
       ctx.lineWidth = tired ? 4 : 3;
       ctx.beginPath(); ctx.arc(en.x, en.y, en.r + 10, 0, TAU); ctx.stroke();
@@ -1624,6 +1802,20 @@ function render() {
         ctx.font = 'bold 12px Segoe UI, sans-serif';
         ctx.fillStyle = '#ffd24a';
         ctx.fillText('EXHAUSTED', en.x, en.y - en.r - 18);
+      }
+      if (en.weakpoint) { // glowing weak spot on its back (away from you)
+        const fd = Math.hypot(G.px - en.x, G.py - en.y) || 1;
+        const wx = en.x - (G.px - en.x) / fd * (en.r + 6), wy = en.y - (G.py - en.y) / fd * (en.r + 6);
+        ctx.fillStyle = '#ffd24a';
+        ctx.globalAlpha = 0.6 + 0.4 * Math.sin(en.t * 7);
+        ctx.beginPath(); ctx.arc(wx, wy, 6, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      if (en.eaterActive > 0) { // inhale visual
+        ctx.strokeStyle = en.color;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath(); ctx.arc(en.x, en.y, 260 * (en.eaterActive / 1.6), 0, TAU); ctx.stroke();
+        ctx.globalAlpha = 1;
       }
     }
     if (en.type === 'charger' && en.mode === 'wind') { // dash telegraph
@@ -1801,7 +1993,7 @@ function updateHUD() {
   $('hpBar').firstElementChild.style.width = clamp(G.hp / s.maxHp * 100, 0, 100) + '%';
   $('xpBar').firstElementChild.style.width = clamp(G.xp / G.xpNeed * 100, 0, 100) + '%';
   $('lvNum').textContent = G.level;
-  $('waveNum').textContent = G.sector + '-' + G.wave;
+  $('waveNum').textContent = (G.ngPlus ? 'NG+' + G.ngPlus + ' ' : '') + G.sector + '-' + G.wave;
   $('killNum').textContent = fmt(G.kills);
   $('bestNum').textContent = Math.max(bestWave, totalWave());
   $('shieldNum').textContent = s.shieldMax > 0 ? `🛡 ${G.shield}/${s.shieldMax}` : '';
@@ -1860,10 +2052,10 @@ function buildRecapHTML() {
 
 function die() {
   state = ST.DEAD;
-  bestWave = Math.max(bestWave, totalWave());
+  bestWave = Math.max(bestWave, (G.ngPlus || 0) * 100000 + totalWave());
   if (store) try { store.setItem('spacesouls.bestWave', String(bestWave)); } catch (e) {}
   $('deadStats').innerHTML = `
-    <div class="sub">Survived to <b>Sector ${G.sector} · Wave ${G.wave}</b> (best: ${bestWave} total waves) · <b>${fmt(G.kills)}</b> kills ·
+    <div class="sub">Survived to <b>${G.ngPlus ? 'NG+' + G.ngPlus + ' · ' : ''}Sector ${G.sector} · Wave ${G.wave}</b> (best: ${bestWave} total waves) · <b>${fmt(G.kills)}</b> kills ·
     Level <b>${G.level}</b> · <b>${G.fusions}</b> auto-fusions · ${fmt(Math.round(G.dmgDealt))} damage dealt</div>
     ${buildRecapHTML()}`;
   $('ovDead').classList.add('on');
@@ -1957,7 +2149,7 @@ window.__GAME__ = {
   levelUnit(i, n) { const u = G.units[i]; for (let k = 0; k < (n || 1); k++) applyCard({ type: 'level', u }); return u; },
   forceLevelUp() { G.pendingLevels++; },
   hurt(d) { hurtPlayer(d); },
-  fireVolley, spawnElite, startSuperBoss, totalWave, ETYPES, waveScale, maxShooters, shooterCount,
+  fireVolley, spawnElite, startSuperBoss, totalWave, wardenTier, WARDEN_TIERS, ETYPES, waveScale, maxShooters, shooterCount,
   kill(en) { killEnemy(en); },
   get world() { return { W, H, zoom: ZOOM }; },
   unitSummary, autoFuse, makeFamilyUnit,
