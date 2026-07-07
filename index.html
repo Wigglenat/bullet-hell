@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MYRIAD BREAK — 万華弾幕 — Infinite Bullet-Hell of 10,000 Powers</title>
+<style>
+  :root {
+    --t1: #9fb4c8; --t2: #54d68a; --t3: #4aa8ff; --t4: #c063ff; --t5: #ffb454;
+    --bg: #07080f; --panel: rgba(10, 12, 24, .92); --line: rgba(140, 160, 255, .18);
+    --ink: #dfe6ff; --dim: #8a93b8; --hot: #ff3a6b; --xp: #54d68a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: var(--bg); overflow: hidden;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; color: var(--ink);
+    user-select: none; -webkit-user-select: none; }
+  #wrap { position: fixed; inset: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: absolute; inset: 0; pointer-events: none; display: none; }
+  #hud.on { display: block; }
+  .hudTop { position: absolute; top: 10px; left: 12px; right: 12px; display: flex;
+    gap: 14px; align-items: center; font-size: 13px; text-shadow: 0 1px 3px #000; }
+  .bar { height: 12px; border: 1px solid var(--line); border-radius: 6px;
+    background: rgba(0,0,0,.55); overflow: hidden; position: relative; }
+  .bar > i { display: block; height: 100%; width: 0%; transition: width .12s; }
+  #hpBar { width: 220px; } #hpBar > i { background: linear-gradient(90deg, #ff3a6b, #ff7a4a); }
+  #xpBar { flex: 1; } #xpBar > i { background: linear-gradient(90deg, #2a9a5a, #54d68a); }
+  .stat { color: var(--dim); } .stat b { color: var(--ink); font-weight: 600; }
+  #powerChips { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 6px;
+    flex-wrap: wrap; max-width: 60vw; }
+  .chip { font-size: 11px; padding: 3px 8px; border-radius: 10px; border: 1px solid;
+    background: rgba(0,0,0,.6); text-shadow: 0 1px 2px #000; white-space: nowrap; }
+  #hintBar { position: absolute; right: 12px; bottom: 12px; font-size: 12px;
+    color: var(--dim); text-shadow: 0 1px 3px #000; text-align: right; }
+  #bossBar { position: absolute; top: 44px; left: 50%; transform: translateX(-50%);
+    width: min(520px, 70vw); display: none; }
+  #bossBar.on { display: block; }
+  #bossBar .bar { height: 10px; } #bossBar > .bar > i { background: linear-gradient(90deg, #a02aff, #ff2a8a); }
+  #bossName { text-align: center; font-size: 12px; color: #e8b8ff; margin-bottom: 3px;
+    letter-spacing: 2px; text-shadow: 0 1px 3px #000; }
+
+  /* ---------- Overlays ---------- */
+  .overlay { position: absolute; inset: 0; display: none; align-items: center;
+    justify-content: center; background: rgba(4, 5, 12, .78); backdrop-filter: blur(3px);
+    z-index: 10; }
+  .overlay.on { display: flex; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px 30px; max-width: min(940px, 94vw); max-height: 92vh; overflow: auto;
+    box-shadow: 0 0 60px rgba(80, 100, 255, .15); text-align: center; }
+  h1 { font-size: 42px; letter-spacing: 8px; background: linear-gradient(90deg,#6fd8ff,#d05cff,#ffb454);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .jp { font-size: 15px; letter-spacing: 10px; color: var(--dim); margin: 4px 0 14px; }
+  .sub { color: var(--dim); font-size: 14px; line-height: 1.7; margin: 10px 0; }
+  .sub b { color: var(--ink); }
+  .tierRow { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 14px 0; }
+  .tierBox { border: 1px solid; border-radius: 10px; padding: 8px 12px; font-size: 12px;
+    min-width: 108px; background: rgba(0,0,0,.35); }
+  .tierBox b { display: block; font-size: 17px; }
+  button { font: inherit; cursor: pointer; color: var(--ink); background: rgba(60, 80, 180, .25);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 26px; font-size: 15px;
+    letter-spacing: 1px; transition: all .15s; }
+  button:hover { background: rgba(90, 120, 255, .35); border-color: #8aa0ff; }
+  button:disabled { opacity: .35; cursor: default; }
+  button.primary { background: linear-gradient(90deg, rgba(80,60,200,.5), rgba(200,60,160,.4)); }
+  .keys { margin-top: 14px; font-size: 12px; color: var(--dim); line-height: 2; }
+  kbd { background: #1a1e34; border: 1px solid var(--line); border-bottom-width: 3px;
+    border-radius: 5px; padding: 1px 7px; font-family: inherit; color: var(--ink); }
+
+  /* ---------- Level-up cards ---------- */
+  #cards { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin: 18px 0 6px; }
+  .card { width: 240px; border: 1.5px solid; border-radius: 12px; padding: 14px;
+    background: rgba(6, 8, 20, .95); cursor: pointer; text-align: left;
+    transition: transform .12s, box-shadow .12s; position: relative; }
+  .card:hover { transform: translateY(-5px) scale(1.02); }
+  .card .tierTag { font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    display: inline-block; padding: 2px 8px; border-radius: 8px; border: 1px solid; margin-bottom: 8px; }
+  .card h3 { font-size: 15px; margin-bottom: 6px; line-height: 1.35; }
+  .card .desc { font-size: 11px; color: var(--dim); line-height: 1.6; }
+  .card .num { position: absolute; top: 10px; right: 12px; font-size: 10px; color: var(--dim); }
+  .card .dupe { color: var(--xp); font-size: 11px; margin-top: 6px; }
+  .t1 { border-color: var(--t1); color: var(--t1); } .t2 { border-color: var(--t2); color: var(--t2); }
+  .t3 { border-color: var(--t3); color: var(--t3); } .t4 { border-color: var(--t4); color: var(--t4); }
+  .t5 { border-color: var(--t5); color: var(--t5);
+    box-shadow: 0 0 24px rgba(255, 180, 84, .35); }
+  .card h3, .card .desc { color: var(--ink); } .card .desc { color: var(--dim); }
+
+  /* ---------- Merge lab ---------- */
+  #mergeGrid { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+    max-height: 40vh; overflow: auto; margin: 12px 0; padding: 6px; }
+  .invItem { border: 1px solid; border-radius: 9px; padding: 6px 10px; font-size: 12px;
+    cursor: pointer; background: rgba(0,0,0,.5); transition: all .12s; text-align: left; }
+  .invItem:hover { filter: brightness(1.4); }
+  .invItem.sel { outline: 2px solid #fff; }
+  .invItem small { display: block; color: var(--dim); font-size: 10px; }
+  #mergePreview { margin: 12px 0; font-size: 14px; min-height: 46px; }
+  .arrow { color: var(--dim); margin: 0 10px; }
+
+  #deadStats { font-size: 14px; line-height: 2.1; margin: 14px 0; color: var(--dim); }
+  #deadStats b { color: var(--ink); }
+  .flash { animation: flash .8s infinite alternate; }
+  @keyframes flash { from { opacity: .55; } to { opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+
+  <div id="hud">
+    <div class="hudTop">
+      <div class="stat">HP</div><div class="bar" id="hpBar"><i></i></div>
+      <div class="stat">Lv <b id="lvNum">1</b></div>
+      <div class="bar" id="xpBar"><i></i></div>
+      <div class="stat">Wave <b id="waveNum">1</b></div>
+      <div class="stat">Kills <b id="killNum">0</b></div>
+      <div class="stat">Codex <b id="codexNum">0</b>/10,000</div>
+    </div>
+    <div id="bossBar"><div id="bossName"></div><div class="bar"><i></i></div></div>
+    <div id="powerChips"></div>
+    <div id="hintBar"><kbd>WASD</kbd> move · <kbd>Shift</kbd> focus · <kbd>E</kbd> merge lab · <kbd>P</kbd> pause</div>
+  </div>
+
+  <div id="ovTitle" class="overlay on"><div class="panel">
+    <h1>MYRIAD BREAK</h1>
+    <div class="jp">万 華 弾 幕 · 無 限</div>
+    <div class="sub">An infinite bullet-hell. Every level-up draws from a pool of
+      <b>10,000 powers</b>.<br>Merge any two powers to forge new ones — and merge those again,
+      and again,<br>up to <b>625 Mythic powers</b>… then overcharge past them, forever.</div>
+    <div class="tierRow">
+      <div class="tierBox t1"><b>5,000</b>Base</div>
+      <div class="tierBox t2"><b>2,500</b>Fused</div>
+      <div class="tierBox t3"><b>1,250</b>Ascended</div>
+      <div class="tierBox t4"><b>625</b>Transcendent</div>
+      <div class="tierBox t5"><b>625</b>Mythic</div>
+    </div>
+    <button class="primary" id="btnStart">BEGIN — 開始</button>
+    <div class="keys"><kbd>WASD</kbd>/<kbd>←↑↓→</kbd> move · <kbd>Shift</kbd> focus (slow, shows hitbox)
+      · <kbd>E</kbd>/<kbd>Tab</kbd> Merge Lab · <kbd>P</kbd>/<kbd>Esc</kbd> pause<br>
+      Powers fire on their own — your job is to dodge, collect, and <b>merge</b>.</div>
+  </div></div>
+
+  <div id="ovLevel" class="overlay"><div class="panel">
+    <h2 style="letter-spacing:4px">LEVEL UP — 昇級</h2>
+    <div class="sub">Three draws from the pool of <b>10,000</b>. Choose one.</div>
+    <div id="cards"></div>
+    <div class="sub" style="font-size:11px" id="oddsLine"></div>
+  </div></div>
+
+  <div id="ovMerge" class="overlay"><div class="panel">
+    <h2 style="letter-spacing:4px">MERGE LAB — 融合炉</h2>
+    <div class="sub">Select any <b>two</b> powers. Both are consumed; a higher-tier power is forged.<br>
+      Recipes are deterministic — the same pair always forges the same result.
+      Mythic + Mythic = <span style="color:var(--t5)">★ Overcharge</span> (stacks forever).</div>
+    <div id="mergeGrid"></div>
+    <div id="mergePreview"></div>
+    <button class="primary" id="btnMerge" disabled>FORGE</button>
+    <button id="btnMergeClose">Back (E)</button>
+  </div></div>
+
+  <div id="ovPause" class="overlay"><div class="panel">
+    <h2 style="letter-spacing:4px">PAUSED — 一時停止</h2>
+    <div class="sub" id="pauseStats"></div>
+    <button class="primary" id="btnResume">Resume (P)</button>
+  </div></div>
+
+  <div id="ovDead" class="overlay"><div class="panel">
+    <h2 style="letter-spacing:4px;color:var(--hot)">SHATTERED — 撃墜</h2>
+    <div id="deadStats"></div>
+    <button class="primary" id="btnRetry">Rise Again — 再起</button>
+  </div></div>
+</div>
+<script src="js/powers.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
