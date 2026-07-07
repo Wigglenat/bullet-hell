@@ -724,10 +724,10 @@ function hitEnemy(en, dmg, noArc) {
   }
   // Frost Shot — chill
   if (s.frost > 0 && Math.random() < s.frost) { en.chillT = 1.2; en.chillF = 0.4; }
-  // Impact — shove away from the player (elites resist, bosses immune)
+  // Impact — shove away from the player (elites and brutes resist, bosses immune)
   if (s.knock > 0 && !en.boss) {
     const kdx = en.x - G.px, kdy = en.y - G.py, kd = Math.hypot(kdx, kdy) || 1;
-    const kk = s.knock * (en.elite ? 0.35 : 1);
+    const kk = s.knock * (en.elite ? 0.35 : en.type === 'brute' ? 0.5 : 1);
     en.kx += kdx / kd * kk; en.ky += kdy / kd * kk;
   }
   // Executioner — finish weakened non-boss enemies
@@ -792,24 +792,40 @@ function blast(x, y, r, dmg) {
 // Enemies & waves
 // ---------------------------------------------------------------------------
 const ETYPES = {
-  chaser:   { hp: 16,  speed: 92,  r: 12, dmg: 12, color: '#ff6b5a', xp: 1 },
-  shooter:  { hp: 22,  speed: 60,  r: 12, dmg: 10, color: '#ffa04a', xp: 1 },
-  spinner:  { hp: 30,  speed: 42,  r: 14, dmg: 12, color: '#d05cff', xp: 2 },
-  tank:     { hp: 90,  speed: 30,  r: 20, dmg: 18, color: '#98a8c8', xp: 3 },
-  darter:   { hp: 14,  speed: 68,  r: 10, dmg: 12, color: '#4ad8ff', xp: 1 },
-  splitter: { hp: 26,  speed: 66,  r: 14, dmg: 12, color: '#9bd820', xp: 2 },
-  boss:     { hp: 800, speed: 40,  r: 42, dmg: 24, color: '#ff2a8a', xp: 45 },
+  chaser:   { hp: 16,  speed: 92,  r: 12, dmg: 11, color: '#ff6b5a', xp: 1 },
+  shooter:  { hp: 22,  speed: 60,  r: 12, dmg: 9,  color: '#ffa04a', xp: 1 },
+  spinner:  { hp: 30,  speed: 42,  r: 14, dmg: 11, color: '#d05cff', xp: 2 },
+  tank:     { hp: 85,  speed: 30,  r: 20, dmg: 16, color: '#98a8c8', xp: 3 },
+  darter:   { hp: 14,  speed: 68,  r: 10, dmg: 11, color: '#4ad8ff', xp: 1 },
+  splitter: { hp: 26,  speed: 66,  r: 14, dmg: 11, color: '#9bd820', xp: 2 },
+  weaver:   { hp: 12,  speed: 108, r: 10, dmg: 10, color: '#5affc8', xp: 1 },
+  brute:    { hp: 110, speed: 42,  r: 23, dmg: 18, color: '#d87a5a', xp: 3 },
+  charger:  { hp: 20,  speed: 62,  r: 13, dmg: 15, color: '#c8ff5a', xp: 2 },
+  boss:     { hp: 800, speed: 40,  r: 42, dmg: 22, color: '#ff2a8a', xp: 45 },
 };
-function waveScale() { return 1 + G.wave * 0.30 + G.wave * G.wave * 0.035; }
+// gentler curve than before: wave 10 ≈ 5.4× (was 7.5×), wave 20 ≈ 14× (was 21×)
+function waveScale() { return 1 + G.wave * 0.22 + G.wave * G.wave * 0.022; }
+
+const SHOOT_TYPES = new Set(['shooter', 'spinner', 'tank']);
+function shooterCount() {
+  let n = 0;
+  for (const e of G.enemies) if (SHOOT_TYPES.has(e.type)) n++;
+  return n;
+}
+function maxShooters() { return Math.min(9, 2 + Math.floor(G.wave / 4)); }
 
 function spawnEnemy(type, x, y, hpMult) {
   const T = ETYPES[type], sc = waveScale();
+  const boss = type === 'boss';
+  // per-enemy variance so hordes feel organic instead of uniform
+  const jHp = boss ? 1 : rand(0.85, 1.15), jSp = boss ? 1 : rand(0.9, 1.15), jR = boss ? 1 : rand(0.92, 1.12);
   const en = {
-    type, x, y, r: T.r, hp: T.hp * sc * (hpMult || 1), maxHp: T.hp * sc * (hpMult || 1),
-    speed: T.speed * (1 + G.wave * 0.008), dmg: T.dmg * (1 + G.wave * 0.05),
+    type, x, y, r: T.r * jR, hp: T.hp * sc * (hpMult || 1) * jHp, maxHp: T.hp * sc * (hpMult || 1) * jHp,
+    speed: T.speed * (1 + G.wave * 0.008) * jSp, dmg: T.dmg * (1 + G.wave * 0.035),
     color: T.color, xp: T.xp, t: rand(0, 9), shootT: rand(1.2, 2.6),
-    boss: type === 'boss', dashT: 0, dvx: 0, dvy: 0, ang: Math.random() * TAU,
+    boss, dashT: 0, dvx: 0, dvy: 0, ang: Math.random() * TAU,
     dead: false, flash: 0, kx: 0, ky: 0, chillT: 0, chillF: 0, ramCd: 0, elite: false,
+    mode: 'approach', modeT: 0, lockX: 0, lockY: 0,
   };
   if (en.boss) {
     en.name = pick(MYTH_BEINGS) + ' THE DEVOURER';
@@ -888,13 +904,20 @@ function updateWave(dt) {
   if (G.spawnT <= 0) {
     G.spawnT = clamp(1.5 - G.wave * 0.045, 0.32, 1.5) * (G.bossAlive ? 1.8 : 1);
     const pack = 1 + ((G.wave / 5) | 0) + ((Math.random() * 2) | 0);
-    const table = ['chaser', 'chaser', 'chaser', 'darter', 'shooter'];
-    if (G.wave >= 3) table.push('shooter', 'splitter');
-    if (G.wave >= 5) table.push('spinner', 'splitter');
-    if (G.wave >= 8) table.push('tank', 'spinner');
+    // melee-heavy table; gun-carriers (shooter/spinner/tank) are the minority
+    const table = ['chaser', 'chaser', 'darter', 'weaver'];
+    if (G.wave >= 2) table.push('weaver', 'chaser');
+    if (G.wave >= 3) table.push('splitter', 'shooter');
+    if (G.wave >= 4) table.push('charger');
+    if (G.wave >= 5) table.push('spinner', 'brute');
+    if (G.wave >= 8) table.push('tank', 'charger', 'brute');
+    const MELEE = ['chaser', 'darter', 'weaver'];
     for (let i = 0; i < pack; i++) {
+      let type = pick(table);
+      // cap on how many shooting enemies can be alive at once
+      if (SHOOT_TYPES.has(type) && shooterCount() >= maxShooters()) type = pick(MELEE);
       const p = edgeSpawnPos();
-      spawnEnemy(pick(table), p.x + rand(-24, 24), p.y + rand(-24, 24));
+      spawnEnemy(type, p.x + rand(-24, 24), p.y + rand(-24, 24));
     }
   }
 }
@@ -914,8 +937,37 @@ function updateEnemy(en, dt) {
   const dx = G.px - en.x, dy = G.py - en.y, d = Math.hypot(dx, dy) || 1;
 
   switch (en.type) {
-    case 'chaser': case 'splitter':
-      en.x += dx / d * sp * dt; en.y += dy / d * sp * dt; break;
+    case 'chaser': case 'splitter': case 'brute': {
+      // slight heading wobble so packs don't form single-file lines
+      const wob = Math.sin(en.t * 3 + en.ang * 4) * (en.type === 'brute' ? 0.15 : 0.45);
+      let vx = dx / d - dy / d * wob, vy = dy / d + dx / d * wob;
+      const m = Math.hypot(vx, vy) || 1;
+      en.x += vx / m * sp * dt; en.y += vy / m * sp * dt;
+      break;
+    }
+    case 'weaver': {
+      // strafes hard side-to-side while closing in
+      const wob = Math.sin(en.t * 4.5 + en.ang) * 1.1;
+      let vx = dx / d - dy / d * wob, vy = dy / d + dx / d * wob;
+      const m = Math.hypot(vx, vy) || 1;
+      en.x += vx / m * sp * dt; en.y += vy / m * sp * dt;
+      break;
+    }
+    case 'charger': {
+      // approach → wind up → dash in a locked line → recover
+      en.modeT -= dt;
+      if (en.mode === 'approach') {
+        en.x += dx / d * sp * dt; en.y += dy / d * sp * dt;
+        if (d < 460) { en.mode = 'wind'; en.modeT = 0.7; }
+      } else if (en.mode === 'wind') {
+        if (en.modeT <= 0) { en.mode = 'dash'; en.modeT = 0.55; en.lockX = dx / d; en.lockY = dy / d; }
+      } else if (en.mode === 'dash') {
+        const dashSp = 520 * (sp / en.speed); // chill/slow fields still apply
+        en.x += en.lockX * dashSp * dt; en.y += en.lockY * dashSp * dt;
+        if (en.modeT <= 0) { en.mode = 'rest'; en.modeT = 0.8; }
+      } else if (en.modeT <= 0) en.mode = 'approach';
+      break;
+    }
     case 'shooter':
       if (d > 240) { en.x += dx / d * sp * dt; en.y += dy / d * sp * dt; }
       else if (d < 170) { en.x -= dx / d * sp * 0.7 * dt; en.y -= dy / d * sp * 0.7 * dt; }
@@ -1418,7 +1470,7 @@ function render() {
     ctx.save();
     ctx.translate(en.x, en.y);
     ctx.rotate(en.t * (en.boss ? 0.5 : 1.2));
-    const sides = { chaser: 3, shooter: 4, spinner: 5, tank: 6, darter: 3, splitter: 8, boss: 7 }[en.type] || 4;
+    const sides = { chaser: 3, shooter: 4, spinner: 5, tank: 6, darter: 3, splitter: 8, weaver: 4, brute: 5, charger: 3, boss: 7 }[en.type] || 4;
     ctx.beginPath();
     for (let i = 0; i < sides; i++) {
       const a = TAU * i / sides;
@@ -1435,6 +1487,12 @@ function render() {
     ctx.lineWidth = en.boss ? 3 : 1.5;
     ctx.stroke();
     ctx.restore();
+    if (en.type === 'charger' && en.mode === 'wind') { // dash telegraph
+      ctx.strokeStyle = '#ffffff';
+      ctx.globalAlpha = 0.4 + 0.5 * Math.abs(Math.sin(en.t * 18));
+      ctx.beginPath(); ctx.arc(en.x, en.y, en.r + 6, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     if (en.elite) { // gold elite ring + name
       ctx.strokeStyle = '#ffd24a';
       ctx.globalAlpha = 0.55 + 0.35 * Math.sin(en.t * 6);
@@ -1760,7 +1818,7 @@ window.__GAME__ = {
   levelUnit(i, n) { const u = G.units[i]; for (let k = 0; k < (n || 1); k++) applyCard({ type: 'level', u }); return u; },
   forceLevelUp() { G.pendingLevels++; },
   hurt(d) { hurtPlayer(d); },
-  fireVolley, spawnElite,
+  fireVolley, spawnElite, ETYPES, waveScale, maxShooters, shooterCount,
   kill(en) { killEnemy(en); },
   get world() { return { W, H, zoom: ZOOM }; },
   unitSummary, autoFuse, makeFamilyUnit,
