@@ -61,8 +61,8 @@ const FAMILIES = {
     desc: 'Pull XP gems from farther away.',              next: '+45% pull radius' },
   slow:      { name: 'Slow Field',  cat: 'UTIL', adj: 'Temporal', noun: 'Field',
     desc: 'Enemies AND their bullets crawl near you.',    next: 'wider, stronger field' },
-  bomb:      { name: 'Bomb',        cat: 'UTIL', adj: 'Volatile', noun: 'Payload',
-    desc: 'Getting hit detonates a bullet-clearing blast.', next: 'shorter cooldown, bigger blast' },
+  bomb:      { name: 'Fire Rounds', cat: 'ATK',  adj: 'Burning',  noun: 'Inferno',
+    desc: 'Your bullets ignite enemies — they keep burning after the hit.', next: '+22% burn damage' },
   rear:      { name: 'Rear Guard',  cat: 'ATK',  adj: 'Vengeful', noun: 'Rearguard',
     desc: 'Also fire a volley backwards.',                next: '+1 rear bullet' },
   side:      { name: 'Side Cannons',cat: 'ATK',  adj: 'Flanking', noun: 'Broadside',
@@ -91,8 +91,8 @@ const FAMILIES = {
     desc: 'Option ships circle you and copy your shots.', next: '+1 drone' },
   missiles:  { name: 'Missiles',    cat: 'ATK',  adj: 'Ballistic', noun: 'Missiles',
     desc: 'Launch homing missiles that explode on impact.', next: '+1 missile, faster salvos' },
-  mortar:    { name: 'Mortar',      cat: 'ATK',  adj: 'Siegeborn', noun: 'Mortar',
-    desc: 'Lob artillery shells that blast a marked area.', next: 'faster shells, bigger blast' },
+  mortar:    { name: 'Splash Rounds', cat: 'ATK', adj: 'Bursting', noun: 'Payload',
+    desc: 'Every bullet hit splashes damage in an area around it.', next: 'wider, harder splash' },
   boom:      { name: 'Explosive Rounds', cat: 'ATK', adj: 'Explosive', noun: 'Rounds',
     desc: 'Your bullets can detonate on hit.',            next: '+8% detonation chance' },
   frost:     { name: 'Frost Shot',  cat: 'ATK',  adj: 'Frozen',   noun: 'Frost',
@@ -147,7 +147,7 @@ const PRIMORDIALS = {
   swarm:      { name: 'ALPHA SWARM',
     desc: '+8 orbital blades · every kill bursts into homing shards' },
   omega:      { name: 'OMEGA PROTOCOL',
-    desc: 'apocalypse barrage every 12s · +3 shield charges at double regen · near-instant bombs' },
+    desc: 'apocalypse barrage every 12s · +3 shield charges at double regen · massive splash on every bullet' },
 };
 const PRIMORDIAL_KEYS = Object.keys(PRIMORDIALS);
 const PRIMORDIAL_CHANCE = 0.0001; // 0.01% per level-up card slot

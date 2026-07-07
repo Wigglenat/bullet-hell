@@ -14,7 +14,7 @@ cards from the 42 classics:
 
 | Attack | Defense | Utility |
 |---|---|---|
-| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Mortar, Explosive Rounds, Frost Shot, Impact, Turret, Vortex | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger, Ram | Speed, Magnetic, Slow Field, Bomb, Greed, Adrenaline, Shrink, Graze |
+| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Fire Rounds (burn), Splash Rounds (AoE), Explosive Rounds, Frost Shot, Impact, Turret, Vortex | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger, Ram | Speed, Magnetic, Slow Field, Greed, Adrenaline, Shrink, Graze |
 
 Every card says exactly what it does ("+1 bullet", "+3% lifesteal", "+1 shield
 charge"). Picking the same family again levels it up.
@@ -83,7 +83,7 @@ build slot**, and each one warps the run:
 | **EVENT HORIZON** | a vast field slows enemies *and* their bullets 60%; every 10s a shockwave erases every enemy bullet |
 | **FIRST LIGHT** | mega-laser every 1.5s, +50% crit chance, crits deal 4× |
 | **ALPHA SWARM** | +8 orbital blades; every kill bursts into homing shards |
-| **OMEGA PROTOCOL** | apocalypse barrage every 12s, +3 shields at double regen, near-instant bombs |
+| **OMEGA PROTOCOL** | apocalypse barrage every 12s, +3 shields at double regen, massive splash on every bullet |
 
 Relics can level (rarely offered as cards): each level makes the whole relic
 +25% stronger.

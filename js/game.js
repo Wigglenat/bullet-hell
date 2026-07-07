@@ -186,15 +186,16 @@ function newRun() {
     faceX: 0, faceY: -1, shake: 0, phoenixUsed: false,
     units: [], ess: { dmg: 0, rate: 0, life: 0 },
     stats: null, shield: 0, shieldT: 0,
-    gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18, bombT: 0,
+    gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18,
     rippleActive: 0, bladeCd: [], rampStart: null, rampMult: 1, pulseT: 0, rebirthT: 0, adrenT: 0,
-    missileT: 2, mortarT: 2.5, turretT: 3, vortexT: 4, heatT: 0,
+    missileT: 2, turretT: 3, vortexT: 4, heatT: 0,
     healAcc: 0, healT: 0, xpAcc: 0, xpT: 0,
     eliteT: 20, eliteSpoils: 0,
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
     turrets: [], vortices: [],
     spawnT: 1.0, bossAlive: null, bannerQ: [], bannerT: 0,
   });
+  document.getElementById('bossBar').classList.remove('on');
   // starting kit: +Bullets Lv1 — instantly legible
   G.units.push(makeFamilyUnit('bullets'));
   recompute();
@@ -215,14 +216,14 @@ function recompute() {
     lifesteal: 0, shieldMax: 0, shieldRegen: 10,
     maxHp: 100, regen: 0, moveSpd: 270, ghostT: 0.9,
     magnetR: 90, slowR: 0, slowEnemy: 0, slowBullet: 0,
-    bombR: 0, bombCd: 0, novaLv: 0, novaCd: 0, laserLv: 0, laserCd: 0,
+    burn: 0, splashR: 0, splashDmg: 0, novaLv: 0, novaCd: 0, laserLv: 0, laserCd: 0,
     orbitals: 0, grazeSlow: 0, gemHeal: 0, sparks: false, kilnova: 0,
     echo: false, ripple: false, guardian: false, phoenix: false, barrage: false,
     allMult: 1, critMult: 2.5, ramp: 0, pulse: 0, rebirth: false, barrageCd: 18,
     shardHoming: false,
     rear: 0, side: 0, arc: 0, cull: 0, thorns: 0, armor: 0, dodge: 0,
     scav: 0, xpMult: 1, adren: 0, hitR: 3.5,
-    drones: 0, missiles: 0, missileCd: 0, mortar: 0, mortarCd: 0, boom: 0,
+    drones: 0, missiles: 0, missileCd: 0, boom: 0,
     frost: 0, knock: 0, turrets: 0, turretCd: 0, vortex: 0, vortexCd: 0,
     graze: 0, grazeR: 0, grazeHeat: 0, ram: 0,
   };
@@ -253,8 +254,7 @@ function recompute() {
       case 'slow':      s.slowR = Math.max(s.slowR, 90 + 22 * L);
                         s.slowEnemy = Math.min(0.7, Math.max(s.slowEnemy, 0.18 + 0.04 * L));
                         s.slowBullet = Math.min(0.6, Math.max(s.slowBullet, 0.10 + 0.035 * L)); break;
-      case 'bomb':      s.bombR = Math.max(s.bombR, 120 + 14 * L);
-                        s.bombCd = s.bombCd ? Math.min(s.bombCd, Math.max(6, 20 - 1.6 * L)) : Math.max(6, 20 - 1.6 * L); break;
+      case 'bomb':      s.burn = Math.min(2.5, s.burn + 0.22 * L); break; // Fire Rounds
       case 'rear':      s.rear += Math.round(L); break;
       case 'side':      s.side += Math.round(L); break;
       case 'arc':       s.arc = Math.min(0.65, s.arc + 0.08 * L); break;
@@ -270,7 +270,8 @@ function recompute() {
       case 'drones':    s.drones = Math.min(6, s.drones + Math.round(L)); break;
       case 'missiles':  s.missiles = Math.min(8, s.missiles + Math.round(L));
                         s.missileCd = Math.max(1.2, 2.4 - 0.15 * L); break;
-      case 'mortar':    s.mortar += L; s.mortarCd = Math.max(1.6, 3.2 - 0.18 * L); break;
+      case 'mortar':    s.splashR = Math.min(130, Math.max(s.splashR, 42 + 5 * L)); // Splash Rounds
+                        s.splashDmg = Math.min(0.8, Math.max(s.splashDmg, 0.32 + 0.03 * L)); break;
       case 'boom':      s.boom = Math.min(0.6, s.boom + 0.08 * L); break;
       case 'frost':     s.frost = Math.min(0.8, s.frost + 0.10 * L); break;
       case 'impact':    s.knock += 90 * L; break;
@@ -360,8 +361,8 @@ function recompute() {
         s.barrageCd = Math.max(6, 12 / k);
         s.shieldMax += 3;
         s.shieldRegen *= 0.5;
-        s.bombR = Math.max(s.bombR, 220);
-        s.bombCd = Math.min(s.bombCd || 6, 2);
+        s.splashR = Math.max(s.splashR, 90);
+        s.splashDmg = Math.max(s.splashDmg, 0.6);
         break;
     }
   }
@@ -733,6 +734,11 @@ function hitEnemy(en, dmg, noArc) {
       hitEnemy(best, dmg * 0.6, true);
     }
   }
+  // Fire Rounds — ignite: the hit keeps burning (strongest burn wins)
+  if (s.burn > 0) {
+    en.burnDps = Math.max(en.burnDps, d * s.burn / 2.2);
+    en.burnT = 2.2;
+  }
   // Frost Shot — chill
   if (s.frost > 0 && Math.random() < s.frost) { en.chillT = 1.2; en.chillF = 0.4; }
   // Impact — shove away from the player (elites and brutes resist, bosses immune)
@@ -852,7 +858,7 @@ const ETYPES = {
 // 100 waves per sector; difficulty scales with the TOTAL wave count
 function totalWave() { return (G.sector - 1) * 100 + G.wave; }
 // gentler curve than before: wave 10 ≈ 5.4× (was 7.5×), wave 20 ≈ 14× (was 21×)
-function waveScale() { const w = totalWave(); return (1 + w * 0.22 + w * w * 0.022) * (1 + (G.ngPlus || 0) * 1.5); }
+function waveScale() { const w = totalWave(); return (1 + w * 0.16 + w * w * 0.013) * (1 + (G.ngPlus || 0) * 1.5); }
 
 const SHOOT_TYPES = new Set(['shooter', 'spinner', 'tank']);
 function shooterCount() {
@@ -869,10 +875,10 @@ function spawnEnemy(type, x, y, hpMult) {
   const jHp = boss ? 1 : rand(0.85, 1.15), jSp = boss ? 1 : rand(0.9, 1.15), jR = boss ? 1 : rand(0.92, 1.12);
   const en = {
     type, x, y, r: T.r * jR, hp: T.hp * sc * (hpMult || 1) * jHp, maxHp: T.hp * sc * (hpMult || 1) * jHp,
-    speed: T.speed * (1 + totalWave() * 0.008) * jSp, dmg: T.dmg * (1 + totalWave() * 0.035) * (1 + (G.ngPlus || 0) * 0.75),
+    speed: T.speed * (1 + totalWave() * 0.006) * jSp, dmg: T.dmg * (1 + totalWave() * 0.025) * (1 + (G.ngPlus || 0) * 0.75),
     color: T.color, xp: T.xp, t: rand(0, 9), shootT: rand(1.2, 2.6),
     boss, dashT: 0, dvx: 0, dvy: 0, ang: Math.random() * TAU,
-    dead: false, flash: 0, kx: 0, ky: 0, chillT: 0, chillF: 0, ramCd: 0, elite: false,
+    dead: false, flash: 0, kx: 0, ky: 0, chillT: 0, chillF: 0, ramCd: 0, elite: false, burnT: 0, burnDps: 0,
     mode: 'approach', modeT: 0, lockX: 0, lockY: 0,
   };
   if (en.boss) {
@@ -1063,6 +1069,12 @@ function updateEnemy(en, dt) {
   if (en.flash > 0) en.flash -= dt;
   if (en.chillT > 0) en.chillT -= dt;
   if (en.ramCd > 0) en.ramCd -= dt;
+  if (en.burnT > 0) { // Fire Rounds — burning over time
+    en.burnT -= dt;
+    en.hp -= en.burnDps * dt;
+    G.dmgDealt += en.burnDps * dt;
+    if (en.hp <= 0) { killEnemy(en); return; }
+  }
   const sp = en.speed * slowFactorAt(en.x, en.y) * (en.chillT > 0 ? 1 - en.chillF : 1);
   const dx = G.px - en.x, dy = G.py - en.y, d = Math.hypot(dx, dy) || 1;
 
@@ -1383,7 +1395,6 @@ function hurtPlayer(dmg) {
   G.shake = Math.max(G.shake, 7);
   SFX.hurt();
   burst(G.px, G.py, '#ff3a6b', 12, 220);
-  if (s.bombR > 0 && G.bombT <= 0) { G.bombT = s.bombCd; bomb(G.px, G.py, s.bombR, s.dmg * 2); }
   if (G.hp <= 0) {
     if (s.rebirth && G.rebirthT <= 0) { // WORLDHEART — full resurrection on cooldown
       G.rebirthT = 90;
@@ -1467,14 +1478,6 @@ function update(dt) {
   if (s.novaLv > 0) { G.novaT -= dt; if (G.novaT <= 0) { G.novaT = s.novaCd; fireNova(); } }
   if (s.laserLv > 0) { G.laserT -= dt; if (G.laserT <= 0) { G.laserT = s.laserCd; fireLaser(); } }
   if (s.missiles > 0) { G.missileT -= dt; if (G.missileT <= 0 && G.enemies.length) { G.missileT = s.missileCd; fireMissiles(); } }
-  if (s.mortar > 0) {                                             // Mortar — telegraphed artillery
-    G.mortarT -= dt;
-    if (G.mortarT <= 0 && G.enemies.length) {
-      G.mortarT = s.mortarCd;
-      const t = pick(G.enemies);
-      G.zones.push({ x: t.x + rand(-24, 24), y: t.y + rand(-24, 24), r: Math.min(150, 70 + 3 * s.mortar), t: 0, tel: 0.7, dmg: s.dmg * 1.6 });
-    }
-  }
   if (s.turrets > 0) {                                            // Turret deployment
     G.turretT -= dt;
     if (G.turretT <= 0 && G.turrets.length < s.turrets) { G.turretT = s.turretCd; G.turrets.push({ x: G.px, y: G.py, t: 0, acc: 0 }); }
@@ -1538,7 +1541,6 @@ function update(dt) {
     }
   }
   if (G.rippleActive > 0) G.rippleActive -= dt;
-  if (G.bombT > 0) G.bombT -= dt;
 
   // shield regen
   if (s.shieldMax > 0 && G.shield < s.shieldMax) {
@@ -1602,6 +1604,7 @@ function update(dt) {
           }
           hitEnemy(en, b.dmg * dmgMod);
           if (b.mBlast) { blast(b.x, b.y, 46, b.dmg * 0.6); dead = true; break; } // Missiles
+          if (s.splashR > 0) blast(b.x, b.y, s.splashR, b.dmg * s.splashDmg); // Splash Rounds
           if (s.boom > 0 && Math.random() < s.boom) blast(b.x, b.y, 46, b.dmg * 0.45); // Explosive Rounds
           if (b.pierce > 0) { b.pierce--; (b.hit || (b.hit = [])).push(en); }
           else { dead = true; break; }
@@ -1844,6 +1847,12 @@ function render() {
         ctx.globalAlpha = 1;
       }
     }
+    if (en.burnT > 0) { // on fire
+      ctx.fillStyle = '#ff8a2a';
+      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(en.t * 14);
+      ctx.beginPath(); ctx.arc(en.x, en.y - en.r * 0.4, en.r * 0.55, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     if (en.type === 'charger' && en.mode === 'wind') { // dash telegraph
       ctx.strokeStyle = '#ffffff';
       ctx.globalAlpha = 0.4 + 0.5 * Math.abs(Math.sin(en.t * 18));
@@ -2072,6 +2081,8 @@ function buildRecapHTML() {
     (s.armor ? ` · armor ${s.armor}` : '') + (s.dodge ? ` · dodge ${Math.round(s.dodge * 100)}%` : '') +
     (s.rear ? ` · rear ${s.rear}` : '') + (s.side ? ` · side ${s.side}×2` : '') +
     (s.arc ? ` · arc ${Math.round(s.arc * 100)}%` : '') + (s.cull ? ` · cull <${Math.round(s.cull * 100)}%` : '') +
+    (s.burn ? ` · burn ${Math.round(s.burn * 100)}%` : '') +
+    (s.splashR ? ` · splash ${Math.round(s.splashR)}px` : '') +
     (s.xpMult > 1 ? ` · xp +${Math.round((s.xpMult - 1) * 100)}%` : '') +
     (s.hitR < 3.5 ? ` · hitbox −${Math.round((1 - s.hitR / 3.5) * 100)}%` : '');
   return `<div style="text-align:left;max-width:520px;margin:0 auto">${rows || '<i>nothing yet</i>'}</div>
@@ -2080,6 +2091,7 @@ function buildRecapHTML() {
 
 function die() {
   state = ST.DEAD;
+  document.getElementById('bossBar').classList.remove('on');
   bestWave = Math.max(bestWave, (G.ngPlus || 0) * 100000 + totalWave());
   if (store) try { store.setItem('spacesouls.bestWave', String(bestWave)); } catch (e) {}
   $('deadStats').innerHTML = `
