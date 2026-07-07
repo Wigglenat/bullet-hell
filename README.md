@@ -1,73 +1,58 @@
-# MYRIAD BREAK — 万華弾幕 · 無限
+# MYRIAD BREAK — auto-fusing bullet hell
 
-An **infinite bullet-hell** built around a **10,000-power merge system**. No build
-step, no dependencies, no install — pure canvas + vanilla JS.
+A bullet hell where your upgrades **fuse themselves**. Pure canvas + vanilla JS,
+no build step, no dependencies.
 
-**To play: open [`index.html`](./index.html) in any browser.** It runs straight
-from `file://` — double-clicking the file is enough. (If the repo is made public,
-it can also be served with GitHub Pages so it's playable from a link.)
+**Play it:** https://wigglenat.github.io/bullet-hell/ — or just open
+[`index.html`](./index.html) in any browser (works from `file://`).
 
-## The 10,000-power pool
+## How it plays
 
-Every level-up deals three draws from a fixed pool of **exactly 10,000 powers**,
-generated deterministically from a world seed — power *No.7777* is the same power
-for everyone, forever.
+Your ship fires by itself — you **dodge**, collect XP gems, and pick upgrades.
+Every level-up offers 3 cards from the 20 classics:
 
-| Tier | Name | Count | How it exists |
-|---|---|---|---|
-| 1 | **Base** | **5,000** | 25 elements × 20 bullet patterns × 10 variants |
-| 2 | **Fused** | **2,500** | merged from two Base powers |
-| 3 | **Ascended** | **1,250** | merged from two Fused powers |
-| 4 | **Transcendent** | **625** | merged from two Ascended powers · adds a **Keystone** passive |
-| 5 | **Mythic** | **625** | merged from two Transcendents · adds a screen-warping **Aura** |
+| Attack | Defense | Utility |
+|---|---|---|
+| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser | Lifesteal, Shield, Vitality, Regen, Ghost | Speed, Magnetic, Slow Field, Bomb |
 
-Merged powers (Tiers 2–5) total **5,000** — half the pool. Because level-up draws
-are uniform across the whole pool, rarity is emergent: **50%** Base, **25%** Fused,
-**12.5%** Ascended, **6.25%** Transcendent, **6.25%** Mythic.
+Every card says exactly what it does ("+1 bullet", "+3% lifesteal", "+1 shield
+charge"). Picking the same family again levels it up.
 
-## Merging — the Merge Lab (press `E`)
+## Automatic fusion — no menus
 
-- Pick **any two** powers you own. Both are consumed; a **higher-tier power is forged**
-  (one tier above the higher ingredient).
-- **Recipes are deterministic** — the same pair always forges the same result, so
-  recipes can be learned, shared, and hunted.
-- Forged powers merge again: Base → Fused → Ascended → Transcendent → **Mythic**.
-- **Mythic + Mythic = ★ Overcharge** — the result gains a stacking ★ (each ★ is
-  ×1.5 damage, **uncapped**). This is the infinite-power endgame.
-- The **Codex** tracks every power you've ever discovered (persists between runs),
-  out of 10,000.
+When two of your powers grow strong enough, they **merge on their own**, keep
+everything they did, get ~15% stronger, and gain a bonus — with a banner
+announcing the result:
 
-## How a power works
+```
+two families at Lv 3+        →  FUSED         "Vampiric Seekers" (Lifesteal + Chase)
+two Fused at Lv 2+           →  ASCENDED      "Ascended Manifold Aegis"
+two Ascended at Lv 2+        →  TRANSCENDENT  gains big specials (time-ripple, guardian nova…)
+two Transcendent at Lv 2+    →  MYTHIC        "OUROBOROS — Colossal Barrage", levels uncapped
+two Mythics                  →  ★ OVERCHARGE  everything ×1.5, stacks forever
+```
 
-Every power is a stack of components, so all 10,000 play differently:
-
-- **20 patterns** — fan, ring, spiral, wave, seeker, orbitals, nova, lance, scatter,
-  flak, boomerang, cross, starburst, wall, meteor, serpent, burst, mine, beam, echo.
-- **25 elements**, each with a real mechanic — burn, chill, chain lightning,
-  vulnerability, knockback, stun, lifesteal, pierce, shatter-AoE, crit, echo-hit,
-  gravity pull…
-- **10 variants** — swift, heavy, twin, rapid, giant, keen, splitting, piercing,
-  volatile, prime.
-- Higher tiers stack **more emitters** (up to 5), then **Keystones** (global passives)
-  and **Auras** (Blade Halo, Stormheart, Event Horizon, Phoenix Soul…).
+Fusing frees a build slot (you hold at most 6 powers), and a fused-away classic
+can be picked up fresh and grown again — that's the engine of infinite scaling.
+Fusion names are readable (adjective of one part + noun of the other), and the
+pause screen (`P`) lists every effect in plain numbers.
 
 ## Controls
 
 | Key | Action |
 |---|---|
-| `WASD` / arrows | move (powers fire themselves — dodge!) |
-| `Shift` | focus — slow movement, shows your true hitbox |
-| `E` / `Tab` | Merge Lab |
-| `P` / `Esc` | pause |
+| `WASD` / arrows | move |
+| `Shift` | focus — slow, precise movement (your red hitbox dot is always visible) |
+| `P` / `Esc` | pause + full build breakdown |
 | `M` | mute |
 
-Survive the waves, beat the wave-10/20/30… bosses, level up, and forge your way
-from a single random Base power to a five-star Mythic arsenal.
+Readability rules: enemy bullets are magenta/white and always drawn on top;
+your bullets are quiet cyan; bosses (every 10th wave) get a name and an HP bar.
 
 ## Repo layout
 
 ```
-index.html      the game shell + all styling
-js/powers.js    the 10,000-power generator, tiers, merge rules
-js/game.js      engine: sim loop, patterns, enemies, waves, UI
+index.html      shell + styling + overlays
+js/powers.js    the 20 families, fusion tiers, auto-fusion logic
+js/game.js      engine: sim loop, firing systems, enemies, waves, UI
 ```

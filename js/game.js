@@ -1,8 +1,13 @@
 'use strict';
 /* ============================================================================
- * MYRIAD BREAK — infinite bullet-hell with a 10,000-power merge system.
- * Engine: single canvas, pooled entities, fixed-timestep sim, DOM overlays.
- * Requires powers.js (PowerPool, TIERS, ELEMENTS, PATTERNS, mergeResultId…).
+ * MYRIAD BREAK v2 — readable bullet-hell, classic powers, automatic fusion.
+ * Requires powers.js (FAMILIES, TIERS, SPECIALS, makeFamilyUnit, autoFuse…).
+ *
+ * Readability rules this engine follows:
+ *   - enemy bullets are magenta/white, biggest glow, drawn ON TOP of everything
+ *   - player bullets are cool cyan and visually quiet
+ *   - no damage-number spam; text is reserved for events that matter
+ *   - the player ship is bright white with a red hitbox dot, always visible
  * ==========================================================================*/
 
 // ---------------------------------------------------------------------------
@@ -20,7 +25,7 @@ function resize() {
 window.addEventListener('resize', resize); resize();
 
 // ---------------------------------------------------------------------------
-// Small utils
+// Utils
 // ---------------------------------------------------------------------------
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -30,32 +35,58 @@ const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 const fmt = (n) => n.toLocaleString('en-US');
 
 // ---------------------------------------------------------------------------
-// Bullet sprite cache — pre-rendered glowing dots per (color, radius bucket)
+// Sprites — pre-rendered glow dots
 // ---------------------------------------------------------------------------
 const spriteCache = new Map();
-function bulletSprite(color, r) {
-  const key = color + '|' + (r | 0);
-  let s = spriteCache.get(key);
+function glowSprite(key, r, build) {
+  const k = key + '|' + (r | 0);
+  let s = spriteCache.get(k);
   if (s) return s;
-  const R = (r | 0) + 6, size = R * 2;
+  const R = (r | 0) + 7, size = R * 2;
   const c = document.createElement('canvas'); c.width = size; c.height = size;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(R, R, 0, R, R, R);
-  grad.addColorStop(0, '#ffffff');
-  grad.addColorStop(0.35, color);
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = grad; g.fillRect(0, 0, size, size);
+  build(c.getContext('2d'), R, r);
   s = { c, R };
-  spriteCache.set(key, s);
+  spriteCache.set(k, s);
   return s;
+}
+function pBulletSprite(r) {
+  return glowSprite('p', r, (g, R) => {
+    const grad = g.createRadialGradient(R, R, 0, R, R, R);
+    grad.addColorStop(0, 'rgba(255,255,255,.95)');
+    grad.addColorStop(0.4, 'rgba(110,220,255,.55)');
+    grad.addColorStop(1, 'rgba(110,220,255,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, R * 2, R * 2);
+  });
+}
+function eBulletSprite(r) {
+  return glowSprite('e', r, (g, R, rr) => {
+    // dark contrast halo → magenta ring → white core: readable on anything
+    g.fillStyle = 'rgba(5,5,15,.85)';
+    g.beginPath(); g.arc(R, R, rr + 3.5, 0, TAU); g.fill();
+    g.fillStyle = '#ff2a7a';
+    g.beginPath(); g.arc(R, R, rr + 1.5, 0, TAU); g.fill();
+    g.fillStyle = '#ffffff';
+    g.beginPath(); g.arc(R, R, Math.max(1.5, rr - 2), 0, TAU); g.fill();
+  });
+}
+function gemSprite() {
+  return glowSprite('g', 6, (g, R) => {
+    const grad = g.createRadialGradient(R, R, 0, R, R, R);
+    grad.addColorStop(0, 'rgba(160,255,190,.9)');
+    grad.addColorStop(1, 'rgba(84,214,138,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, R * 2, R * 2);
+    g.fillStyle = '#54d68a';
+    g.beginPath(); g.moveTo(R, R - 5); g.lineTo(R + 4, R); g.lineTo(R, R + 5); g.lineTo(R - 4, R);
+    g.closePath(); g.fill();
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Tiny WebAudio synth (initialized on first user gesture)
+// Tiny synth
 // ---------------------------------------------------------------------------
 const SFX = (() => {
   let ac = null, muted = false;
-  function init() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* no audio */ } } }
+  function init() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } }
   function blip(freq, dur, type, vol) {
     if (!ac || muted) return;
     const o = ac.createOscillator(), g = ac.createGain();
@@ -66,14 +97,15 @@ const SFX = (() => {
     o.start(); o.stop(ac.currentTime + dur);
   }
   return {
-    init,
-    toggle() { muted = !muted; return muted; },
-    kill()   { blip(rand(180, 260), 0.08, 'square', 0.025); },
-    hurt()   { blip(90, 0.25, 'sawtooth', 0.06); },
-    gem()    { blip(rand(880, 1100), 0.05, 'sine', 0.02); },
-    level()  { blip(520, 0.12, 'triangle', 0.05); setTimeout(() => blip(780, 0.18, 'triangle', 0.05), 90); },
-    forge()  { blip(300, 0.15, 'sawtooth', 0.045); setTimeout(() => blip(600, 0.2, 'triangle', 0.05), 110); },
-    mythic() { [440, 554, 659, 880].forEach((f, i) => setTimeout(() => blip(f, 0.25, 'triangle', 0.05), i * 100)); },
+    init, toggle() { muted = !muted; return muted; },
+    kill()  { blip(rand(180, 240), 0.06, 'square', 0.02); },
+    hurt()  { blip(90, 0.25, 'sawtooth', 0.06); },
+    gem()   { blip(rand(900, 1080), 0.04, 'sine', 0.015); },
+    level() { blip(520, 0.12, 'triangle', 0.05); setTimeout(() => blip(780, 0.18, 'triangle', 0.05), 90); },
+    fuse()  { [330, 440, 660].forEach((f, i) => setTimeout(() => blip(f, 0.2, 'triangle', 0.05), i * 90)); },
+    mythic(){ [440, 554, 659, 880].forEach((f, i) => setTimeout(() => blip(f, 0.25, 'triangle', 0.05), i * 100)); },
+    shield(){ blip(1200, 0.1, 'sine', 0.05); },
+    bomb()  { blip(60, 0.4, 'sawtooth', 0.08); },
   };
 })();
 
@@ -85,170 +117,273 @@ window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   keys.add(k);
   if (k === 'tab') e.preventDefault();
-  handleKey(k, e);
+  handleKey(k);
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
 // ---------------------------------------------------------------------------
-// Game state
+// State
 // ---------------------------------------------------------------------------
-const ST = { TITLE: 0, PLAY: 1, LEVELUP: 2, MERGE: 3, PAUSE: 4, DEAD: 5 };
+const ST = { TITLE: 0, PLAY: 1, LEVELUP: 2, PAUSE: 3, DEAD: 4 };
 let state = ST.TITLE;
 
-const G = {};                       // current run, built by newRun()
 const store = (() => { try { const s = window.localStorage; s.getItem('x'); return s; } catch (e) { return null; } })();
-const codex = new Set(JSON.parse((store && store.getItem('myriad.codex')) || '[]'));
 let bestWave = +((store && store.getItem('myriad.bestWave')) || 0);
-function saveCodex() {
-  if (!store) return;
-  try {
-    store.setItem('myriad.codex', JSON.stringify([...codex]));
-    store.setItem('myriad.bestWave', String(Math.max(bestWave, G.wave || 0)));
-  } catch (e) { /* storage full/blocked — codex just won't persist */ }
-}
 
+const G = {};
 function newRun() {
   Object.assign(G, {
-    time: 0, wave: 1, waveT: 0, kills: 0, forges: 0, dmgDealt: 0,
+    time: 0, wave: 1, waveT: 0, kills: 0, fusions: 0, dmgDealt: 0,
     level: 1, xp: 0, xpNeed: xpNeed(1), pendingLevels: 0,
-    px: W / 2, py: H * 0.72, pr: 3.5, hp: 100, hpMax: 100, iT: 0, focus: false,
-    faceX: 0, faceY: -1, phoenixUsed: false, shake: 0,
-    equipped: [], bench: [],        // power instances {id, level, stars, accs[], spiral}
+    px: W / 2, py: H * 0.7, pr: 3.5, hp: 100, iT: 0, focus: false,
+    faceX: 0, faceY: -1, shake: 0, phoenixUsed: false,
+    units: [], ess: { dmg: 0, rate: 0, life: 0 },
+    stats: null, shield: 0, shieldT: 0,
+    gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18, bombT: 0,
+    rippleActive: 0, bladeCd: [],
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
-    spawnT: 1.2, bossAlive: null, auraT: 0,
+    spawnT: 1.0, bossAlive: null, bannerQ: [], bannerT: 0,
   });
-  // starting power: a random base power — the first draw of the run
-  grantPower((Math.random() * 5000) | 0, true);
-  refreshChips();
+  // starting kit: +Bullets Lv1 — instantly legible
+  G.units.push(makeFamilyUnit('bullets'));
+  recompute();
+  G.hp = G.stats.maxHp;
 }
-
 function xpNeed(lv) { return Math.floor(5 + lv * 3 + lv * lv * 0.2); }
 
 // ---------------------------------------------------------------------------
-// Power instances — equip / bench / level / merge
+// Stats — one aggregate, recomputed only when the build changes
 // ---------------------------------------------------------------------------
-const MAX_EQUIPPED = 6;
+function recompute() {
+  const s = {
+    dmg: 10, rate: 2.0, count: 1, speed: 400, size: 5,
+    pierce: 0, bounce: 0, homing: 0, splitShards: 0, crit: 0.03,
+    lifesteal: 0, shieldMax: 0, shieldRegen: 10,
+    maxHp: 100, regen: 0, moveSpd: 270, ghostT: 0.9,
+    magnetR: 90, slowR: 0, slowEnemy: 0, slowBullet: 0,
+    bombR: 0, bombCd: 0, novaLv: 0, novaCd: 0, laserLv: 0, laserCd: 0,
+    orbitals: 0, grazeSlow: 0, gemHeal: 0, sparks: false, kilnova: 0,
+    echo: false, ripple: false, guardian: false, phoenix: false, barrage: false,
+    allMult: 1,
+  };
+  s.dmg *= 1 + 0.04 * G.ess.dmg;
+  s.rate *= 1 + 0.03 * G.ess.rate;
+  s.maxHp += 10 * G.ess.life;
 
-function makeInstance(id) {
-  const p = PowerPool[id];
-  return { id, level: 1, stars: 0, accs: p.emitters.map(() => Math.random() * 0.5), spiral: Math.random() * TAU };
-}
+  for (const u of G.units) walkUnit(u, (key, L) => {
+    switch (key) {
+      case 'bullets':   s.count += Math.round(L); break;
+      case 'chase':     s.homing += 1.8 * L; break;
+      case 'pierce':    s.pierce += Math.round(L); break;
+      case 'bounce':    s.bounce += Math.round(L); break;
+      case 'rapid':     s.rate *= 1 + 0.14 * L; break;
+      case 'big':       s.size *= 1 + 0.18 * Math.min(L, 8); s.dmg *= 1 + 0.12 * L; break;
+      case 'split':     s.splitShards += Math.round(L); break;
+      case 'crit':      s.crit += 0.07 * L; break;
+      case 'orbitals':  s.orbitals += Math.round(L); break;
+      case 'nova':      s.novaLv += L; break;
+      case 'laser':     s.laserLv += L; break;
+      case 'lifesteal': s.lifesteal += 0.03 * L; break;
+      case 'shield':    s.shieldMax += Math.round(L); s.shieldRegen = Math.max(4, 10 - 0.4 * L); break;
+      case 'vitality':  s.maxHp += 20 * L; break;
+      case 'regen':     s.regen += 0.8 * L; break;
+      case 'ghost':     s.ghostT += 0.3 * L; break;
+      case 'speed':     s.moveSpd *= 1 + 0.07 * Math.min(L, 10); break;
+      case 'magnet':    s.magnetR *= 1 + 0.45 * L; break;
+      case 'slow':      s.slowR = Math.max(s.slowR, 90 + 22 * L);
+                        s.slowEnemy = Math.min(0.7, Math.max(s.slowEnemy, 0.18 + 0.04 * L));
+                        s.slowBullet = Math.min(0.6, Math.max(s.slowBullet, 0.10 + 0.035 * L)); break;
+      case 'bomb':      s.bombR = Math.max(s.bombR, 120 + 14 * L);
+                        s.bombCd = s.bombCd ? Math.min(s.bombCd, Math.max(6, 20 - 1.6 * L)) : Math.max(6, 20 - 1.6 * L); break;
+    }
+  });
+  for (const u of G.units) walkSpecials(u, (sp) => {
+    switch (sp.key) {
+      case 'dmg15': s.dmg *= 1.15; break;
+      case 'rate12': s.rate *= 1.12; break;
+      case 'pierce1': s.pierce += 1; break;
+      case 'sparks': s.sparks = true; break;
+      case 'crit10': s.crit += 0.10; break;
+      case 'bullet1': s.count += 1; break;
+      case 'graze': s.grazeSlow = Math.min(0.4, s.grazeSlow + 0.10); break;
+      case 'gemheal': s.gemHeal += 1; break;
+      case 'echo': s.echo = true; break;
+      case 'dmg25': s.dmg *= 1.25; break;
+      case 'bullet2': s.count += 2; break;
+      case 'kilnova': s.kilnova = Math.min(0.5, s.kilnova + 0.10); break;
+      case 'steel': s.pierce += 1; s.bounce += 1; break;
+      case 'ripple': s.ripple = true; break;
+      case 'dmg40': s.dmg *= 1.40; break;
+      case 'guardian': s.guardian = true; break;
+      case 'drain': s.lifesteal += 0.05; break;
+      case 'phoenix': s.phoenix = true; break;
+      case 'barrage': s.barrage = true; break;
+      case 'infinity': s.allMult *= 1.2; break;
+    }
+  });
+  s.dmg *= s.allMult;
+  s.rate *= 1 + (s.allMult - 1) * 0.5;
+  s.moveSpd *= 1 + (s.allMult - 1) * 0.25;
+  // readability caps — damage scales forever, the SCREEN stays legible
+  s.rate = Math.min(s.rate, 14);
+  s.count = Math.min(s.count, 24);
+  s.size = Math.min(s.size, 15);
+  s.orbitals = Math.min(s.orbitals, 12);
+  s.slowR = Math.min(s.slowR, 260);
+  s.splitShards = Math.min(s.splitShards, 12);
+  s.magnetR = Math.min(s.magnetR, 900);
+  s.moveSpd = Math.min(s.moveSpd, 460);
+  s.novaCd = s.novaLv > 0 ? Math.max(2.2, 6 - 0.4 * s.novaLv) : 0;
+  s.laserCd = s.laserLv > 0 ? Math.max(2.2, 7 - 0.5 * s.laserLv) : 0;
 
-function grantPower(id, silent) {
-  codex.add(id);
-  const dupe = G.equipped.find(i => i.id === id) || G.bench.find(i => i.id === id);
-  if (dupe) { dupe.level++; if (!silent) floatText(G.px, G.py - 26, PowerPool[id].name + ' Lv' + dupe.level, TIERS[PowerPool[id].tier].color); }
-  else {
-    const inst = makeInstance(id);
-    if (G.equipped.length < MAX_EQUIPPED) G.equipped.push(inst);
-    else G.bench.push(inst);
-    if (!silent) floatText(G.px, G.py - 26, '+ ' + PowerPool[id].name, TIERS[PowerPool[id].tier].color);
-  }
-  saveCodex();
+  const oldMax = G.stats ? G.stats.maxHp : s.maxHp;
+  G.stats = s;
+  if (s.maxHp > oldMax) G.hp = Math.min(s.maxHp, G.hp + (s.maxHp - oldMax)); // growing maxHp heals the difference
+  G.shield = Math.min(G.shield, s.shieldMax);
+  if (G.bladeCd.length !== s.orbitals) G.bladeCd = new Array(s.orbitals).fill(0);
   refreshChips();
-  return dupe || null;
 }
 
-function removeInstance(inst) {
-  let i = G.equipped.indexOf(inst);
-  if (i >= 0) { G.equipped.splice(i, 1); return; }
-  i = G.bench.indexOf(inst);
-  if (i >= 0) G.bench.splice(i, 1);
-}
+// ---------------------------------------------------------------------------
+// Build changes
+// ---------------------------------------------------------------------------
+const MAX_UNITS = 6;
 
-function forgeMerge(instA, instB) {
-  const resId = mergeResultId(instA.id, instB.id);
-  const overch = isOvercharge(instA.id, instB.id);
-  const carryLevel = Math.max(1, Math.round((instA.level + instB.level) / 2));
-  const carryStars = overch ? Math.max(instA.stars, instB.stars) + 1
-                            : Math.max(instA.stars, instB.stars);
-  removeInstance(instA); removeInstance(instB);
-
-  const dupe = G.equipped.find(i => i.id === resId) || G.bench.find(i => i.id === resId);
-  let inst;
-  if (dupe) { dupe.level += carryLevel; dupe.stars = Math.max(dupe.stars, carryStars); inst = dupe; }
-  else {
-    inst = makeInstance(resId);
-    inst.level = carryLevel; inst.stars = carryStars;
-    if (G.equipped.length < MAX_EQUIPPED) G.equipped.push(inst);
-    else G.bench.push(inst);
+function applyCard(card) {
+  if (card.type === 'new') {
+    if (!FAMILIES[card.key]) return;
+    G.units.push(makeFamilyUnit(card.key));
+    announce(FAMILIES[card.key].name + ' acquired', CATS[FAMILIES[card.key].cat].color);
+  } else if (card.type === 'level') {
+    card.u.level++;
+  } else if (card.type === 'ess') {
+    G.ess[card.key]++;
+    if (card.key === 'life') G.hp = Math.min((G.stats ? G.stats.maxHp : 100) + 10, G.hp + 40);
   }
-  G.forges++;
-  codex.add(resId); saveCodex(); refreshChips();
-  const P = PowerPool[resId];
-  if (P.tier === 5) SFX.mythic(); else SFX.forge();
-  floatText(G.px, G.py - 30, (overch ? '★ OVERCHARGE — ' : 'FORGED — ') + P.name, TIERS[P.tier].color);
-  burst(G.px, G.py, TIERS[P.tier].color, 26, 240);
-  return inst;
+  // automatic fusions — may ladder (Fused → Ascended → …), one banner each
+  let f;
+  while ((f = autoFuse(G.units))) {
+    G.fusions++;
+    G.bannerQ.push(f);
+    if (G.bannerQ.length > 6) G.bannerQ.shift();
+    if (f.unit.tier === 5 || f.kind === 'overcharge') SFX.mythic(); else SFX.fuse();
+  }
+  recompute();
 }
 
-// Damage/rate multipliers for an instance.
-function instDmgMult(inst) { return (1 + 0.18 * (inst.level - 1)) * Math.pow(1.5, inst.stars); }
-function instRateMult(inst) { return 1 + 0.06 * (inst.level - 1) + 0.05 * inst.stars; }
+function announce(txt, color) {
+  G.floats.push({ x: G.px, y: G.py - 30, txt, color: color || '#dfe6ff', t: 0, life: 1.2 });
+  if (G.floats.length > 24) G.floats.shift();
+}
 
-// Aggregate keystones across equipped powers.
-function keystones() {
-  const k = { dmg: 1, rate: 1, move: 1, killNova: 0, xp: 1, bSpeed: 1, crit: 0, magnet: 1, count: 0, pierce: 0 };
-  for (const inst of G.equipped) {
-    const ks = PowerPool[inst.id].keystone;
-    if (!ks) continue;
-    switch (ks.key) {
-      case 'pierce_all': k.pierce += 1; break;
-      case 'dmg_all': k.dmg *= 1.20; break;
-      case 'rate_all': k.rate *= 1.15; break;
-      case 'move': k.move *= 1.12; break;
-      case 'kill_nova': k.killNova += 0.10; break;
-      case 'xp_gain': k.xp *= 1.25; break;
-      case 'bullet_speed': k.bSpeed *= 1.20; break;
-      case 'crit_all': k.crit += 0.10; break;
-      case 'magnet': k.magnet *= 2; break;
-      case 'count_all': k.count += 1; break;
+// ---------------------------------------------------------------------------
+// Level-up cards
+// ---------------------------------------------------------------------------
+function cardPool() {
+  const pool = [];
+  for (const u of G.units) {
+    if (u.level < TIERS[u.tier].maxLevel) pool.push({ type: 'level', u, w: 3 });
+  }
+  if (G.units.length < MAX_UNITS) {
+    for (const key of FAMILY_KEYS) {
+      if (!G.units.some(u => u.kind === 'family' && u.key === key)) pool.push({ type: 'new', key, w: 3 });
     }
   }
-  return k;
+  pool.push({ type: 'ess', key: 'dmg', w: 1 }, { type: 'ess', key: 'rate', w: 1 }, { type: 'ess', key: 'life', w: 1 });
+  return pool;
 }
-let KS = null; // cached per-frame
+
+function drawCards(n) {
+  const pool = cardPool(), out = [];
+  for (let k = 0; k < n && pool.length; k++) {
+    let total = 0;
+    for (const c of pool) total += c.w;
+    let r = Math.random() * total, idx = 0;
+    for (; idx < pool.length - 1; idx++) { r -= pool[idx].w; if (r <= 0) break; }
+    out.push(pool.splice(idx, 1)[0]);
+  }
+  return out;
+}
+
+const ESS_INFO = {
+  dmg:  { name: 'Essence of Power', desc: 'Permanent +4% damage.',           color: '#ff8a5a' },
+  rate: { name: 'Essence of Haste', desc: 'Permanent +3% fire rate.',        color: '#6fd8ff' },
+  life: { name: 'Essence of Life',  desc: 'Heal 40 HP and gain +10 max HP.', color: '#54d68a' },
+};
+
+function cardHTML(card) {
+  if (card.type === 'new') {
+    const F = FAMILIES[card.key], C = CATS[F.cat];
+    return { border: C.color, html: `
+      <span class="tierTag" style="border-color:${C.color};color:${C.color}">NEW · ${C.label}</span>
+      <h3>${F.name}</h3>
+      <div class="desc">${F.desc}</div>` };
+  }
+  if (card.type === 'level') {
+    const u = card.u;
+    if (u.kind === 'family') {
+      const F = FAMILIES[u.key], C = CATS[F.cat];
+      return { border: C.color, html: `
+        <span class="tierTag" style="border-color:${C.color};color:${C.color}">${C.label} · Lv ${u.level} → ${u.level + 1}</span>
+        <h3>${F.name}</h3>
+        <div class="desc">${F.desc}<br><b style="color:${C.color}">Next: ${F.next}</b></div>` };
+    }
+    const T = TIERS[u.tier], sum = unitSummary(u);
+    return { border: T.color, html: `
+      <span class="tierTag" style="border-color:${T.color};color:${T.color}">${T.jp} ${T.name} · Lv ${u.level} → ${u.level + 1}</span>
+      <h3>${'★'.repeat(Math.min(u.stars, 5))} ${u.name}</h3>
+      <div class="desc">All of it, +10% stronger:<br>${sum.effects.join(' · ')}
+      ${sum.specials.length ? '<br><b>' + sum.specials.join(' · ') + '</b>' : ''}</div>` };
+  }
+  const E = ESS_INFO[card.key];
+  return { border: E.color, html: `
+    <span class="tierTag" style="border-color:${E.color};color:${E.color}">Essence</span>
+    <h3>${E.name}</h3>
+    <div class="desc">${E.desc}</div>` };
+}
+
+function openLevelUp() {
+  state = ST.LEVELUP;
+  G.pendingLevels--;
+  SFX.level();
+  const wrap = document.getElementById('cards');
+  wrap.innerHTML = '';
+  for (const card of drawCards(3)) {
+    const info = cardHTML(card);
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.style.borderColor = info.border;
+    el.innerHTML = info.html;
+    el.addEventListener('click', () => {
+      applyCard(card);
+      G.hp = Math.min(G.stats.maxHp, G.hp + G.stats.maxHp * 0.15);
+      closeOverlays();
+      if (G.pendingLevels > 0) openLevelUp();
+      else state = ST.PLAY;
+    });
+    wrap.appendChild(el);
+  }
+  document.getElementById('ovLevel').classList.add('on');
+}
 
 // ---------------------------------------------------------------------------
-// Entity pools
+// Entities
 // ---------------------------------------------------------------------------
-const CAP = { pB: 2200, eB: 900, enemies: 220, parts: 600, gems: 400, floats: 60 };
+const CAP = { pB: 1400, eB: 700, enemies: 200, parts: 350, gems: 400 };
+function poolPush(arr, cap, obj) { if (arr.length >= cap) arr.shift(); arr.push(obj); return obj; }
 
-function poolPush(arr, cap, obj) {
-  if (arr.length >= cap) arr.shift();
-  arr.push(obj);
-  return obj;
-}
-
-function spawnPB(o) {
-  // player bullet defaults
-  return poolPush(G.pB, CAP.pB, Object.assign({
-    x: 0, y: 0, vx: 0, vy: 0, t: 0, life: 1.5, size: 5, dmg: 5, el: 0,
-    pierce: 0, crit: 0, hit: null, kind: 0, delay: 0,
-    dirX: 0, dirY: 0, amp: 0, homing: 0, split: false, volatile: false,
-    orbit: null, phase: 0, ret: false, cd: 0, grow: 0, hitSet: null, src: null,
-  }, o));
-}
 function spawnEB(o) {
-  return poolPush(G.eB, CAP.eB, Object.assign({ x: 0, y: 0, vx: 0, vy: 0, t: 0, life: 6, size: 5, dmg: 10, color: '#ff5a8a' }, o));
+  return poolPush(G.eB, CAP.eB, Object.assign({ x: 0, y: 0, vx: 0, vy: 0, t: 0, life: 7, size: 5, dmg: 10 }, o));
 }
-
 function burst(x, y, color, n, speed) {
   for (let i = 0; i < n; i++) {
-    const a = Math.random() * TAU, s = rand(speed * 0.3, speed);
-    poolPush(G.parts, CAP.parts, { x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, t: 0, life: rand(0.3, 0.7), color, size: rand(1.5, 3.5) });
+    const a = Math.random() * TAU, sp = rand(speed * 0.3, speed);
+    poolPush(G.parts, CAP.parts, { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: rand(0.2, 0.45), color, size: rand(1.5, 3) });
   }
-}
-function floatText(x, y, txt, color) {
-  poolPush(G.floats, CAP.floats, { x, y, txt, color, t: 0, life: 1.1 });
-}
-function dmgNumber(x, y, dmg, crit) {
-  if (G.floats.length > 40 && !crit && Math.random() < 0.5) return; // decongest
-  poolPush(G.floats, CAP.floats, { x: x + rand(-8, 8), y, txt: String(Math.round(dmg)), color: crit ? '#ffd24a' : '#cfd8ff', t: 0, life: 0.55, small: true });
 }
 
 // ---------------------------------------------------------------------------
-// Spatial hash for enemies (rebuilt each frame)
+// Spatial hash
 // ---------------------------------------------------------------------------
 const CELL = 72;
 const grid = new Map();
@@ -256,13 +391,13 @@ function gridKey(cx, cy) { return cx * 4096 + cy; }
 function rebuildGrid() {
   grid.clear();
   for (const en of G.enemies) {
-    const cx = (en.x / CELL) | 0, cy = (en.y / CELL) | 0;
-    const key = gridKey(cx, cy);
+    const key = gridKey((en.x / CELL) | 0, (en.y / CELL) | 0);
     let cell = grid.get(key);
     if (!cell) { cell = []; grid.set(key, cell); }
     cell.push(en);
   }
 }
+const _near = [];
 function nearEnemies(x, y, r, out) {
   out.length = 0;
   const x0 = ((x - r) / CELL) | 0, x1 = ((x + r) / CELL) | 0;
@@ -273,8 +408,6 @@ function nearEnemies(x, y, r, out) {
   }
   return out;
 }
-const _near = [];
-
 function nearestEnemy(x, y) {
   let best = null, bd = Infinity;
   for (const en of G.enemies) {
@@ -285,243 +418,154 @@ function nearestEnemy(x, y) {
 }
 
 // ---------------------------------------------------------------------------
-// Firing — the 20 patterns
+// Firing
 // ---------------------------------------------------------------------------
-function aimDir() {
+function aimAngle() {
   const t = nearestEnemy(G.px, G.py);
-  if (t) { const d = Math.hypot(t.x - G.px, t.y - G.py) || 1; return { x: (t.x - G.px) / d, y: (t.y - G.py) / d, t }; }
-  return { x: G.faceX, y: G.faceY, t: null };
+  if (t) return Math.atan2(t.y - G.py, t.x - G.px);
+  return Math.atan2(G.faceY, G.faceX);
 }
 
-function fireEmitter(inst, ei) {
-  const P = PowerPool[inst.id], e = P.emitters[ei], EL = ELEMENTS[e.el];
-  const dmg = e.dmg * instDmgMult(inst) * KS.dmg;
-  const speed = e.speed * KS.bSpeed;
-  const count = Math.max(1, Math.round(e.count)) + KS.count;
-  let pierce = e.pierce + KS.pierce + (EL.mech === 'pierce' ? EL.p : 0);
-  let crit = e.crit + KS.crit + (EL.mech === 'crit' ? EL.p : 0);
-  const A = aimDir();
-  const base = {
-    size: e.size, dmg, el: e.el, pierce, crit, life: e.life,
-    split: e.split, volatile: e.volatile, src: inst,
-  };
-  const aimed = (n, spreadAngle, opts) => {
-    const a0 = Math.atan2(A.y, A.x);
-    for (let i = 0; i < n; i++) {
-      const a = n === 1 ? a0 : a0 - spreadAngle / 2 + spreadAngle * (i / (n - 1));
-      spawnPB(Object.assign({}, base, { x: G.px, y: G.py, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, dirX: Math.cos(a), dirY: Math.sin(a) }, opts));
-    }
-  };
-  switch (PATTERNS[e.pat].key) {
-    case 'fan': aimed(count, 0.62); break;
-    case 'ring': {
-      const off = Math.random() * TAU;
-      for (let i = 0; i < count; i++) {
-        const a = off + TAU * i / count;
-        spawnPB(Object.assign({}, base, { x: G.px, y: G.py, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed }));
-      }
-      break;
-    }
-    case 'spiral': {
-      inst.spiral += 0.42;
-      for (let i = 0; i < count; i++) {
-        const a = inst.spiral + TAU * i / count;
-        spawnPB(Object.assign({}, base, { x: G.px, y: G.py, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed }));
-      }
-      break;
-    }
-    case 'wave': aimed(count, 0.5, { kind: 1, amp: 110 }); break;
-    case 'seeker': aimed(count, 0.9, { homing: 4.2, life: e.life }); break;
-    case 'orbitals': {
-      // keep `count` orbitals alive per emitter
-      let alive = 0;
-      for (const b of G.pB) if (b.src === inst && b.orbit && b.orbit.ei === ei) alive++;
-      for (let i = alive; i < count; i++) {
-        spawnPB(Object.assign({}, base, {
-          x: G.px, y: G.py, life: e.life, pierce: 9999,
-          orbit: { ei, a: Math.random() * TAU, r: 24, tr: 64 + e.size * 3, av: e.speed },
-        }));
-      }
-      break;
-    }
-    case 'nova': spawnPB(Object.assign({}, base, { x: G.px, y: G.py, kind: 2, grow: speed, size: e.size, pierce: 9999, hitSet: [] })); break;
-    case 'lance': aimed(count, 0.3, { pierce: pierce + 3 }); break;
-    case 'scatter': {
-      const a0 = Math.atan2(A.y, A.x);
-      for (let i = 0; i < count; i++) {
-        const a = a0 + rand(-0.5, 0.5), s = speed * rand(0.75, 1.2);
-        spawnPB(Object.assign({}, base, { x: G.px, y: G.py, vx: Math.cos(a) * s, vy: Math.sin(a) * s }));
-      }
-      break;
-    }
-    case 'flak': aimed(count, 0.4, { kind: 3 }); break;
-    case 'boomerang': aimed(count, 0.5, { kind: 4, pierce: 9999 }); break;
-    case 'cross': {
-      for (let i = 0; i < 4; i++) {
-        const a = i * Math.PI / 2 + (count > 4 ? Math.PI / 4 : 0);
-        spawnPB(Object.assign({}, base, { x: G.px, y: G.py, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed }));
-      }
-      break;
-    }
-    case 'starburst': {
-      inst.spiral += 0.7;
-      for (let i = 0; i < count; i++) {
-        const a = inst.spiral + TAU * i / count;
-        spawnPB(Object.assign({}, base, { x: G.px, y: G.py, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed }));
-      }
-      break;
-    }
-    case 'wall': {
-      const a0 = Math.atan2(A.y, A.x), px = -Math.sin(a0), py = Math.cos(a0);
-      for (let i = 0; i < count; i++) {
-        const off = (i - (count - 1) / 2) * (e.size * 3.2);
-        spawnPB(Object.assign({}, base, { x: G.px + px * off, y: G.py + py * off, vx: Math.cos(a0) * speed, vy: Math.sin(a0) * speed }));
-      }
-      break;
-    }
-    case 'meteor': {
-      const t = A.t;
-      const tx = t ? t.x + rand(-30, 30) : G.px + G.faceX * 160, ty = t ? t.y + rand(-30, 30) : G.py + G.faceY * 160;
-      G.zones.push({ x: tx, y: ty, r: e.size, t: 0, tel: 0.55, dmg, el: e.el, color: EL.color, crit, src: inst });
-      break;
-    }
-    case 'serpent': aimed(count, 0.4, { kind: 1, amp: 190, homing: 1.4 }); break;
-    case 'burst': {
-      const a0 = Math.atan2(A.y, A.x);
-      for (let i = 0; i < count; i++) {
-        spawnPB(Object.assign({}, base, { x: G.px, y: G.py, vx: Math.cos(a0) * speed, vy: Math.sin(a0) * speed, delay: i * 0.07 }));
-      }
-      break;
-    }
-    case 'mine': {
-      for (let i = 0; i < count; i++) {
-        spawnPB(Object.assign({}, base, {
-          x: G.px + rand(-40, 40), y: G.py + rand(-40, 40), kind: 5, life: e.life, phase: 0.3,
-        }));
-      }
-      break;
-    }
-    case 'beam': {
-      const a0 = Math.atan2(A.y, A.x), range = 520, w = e.size + 3;
-      const cos = Math.cos(a0), sin = Math.sin(a0);
-      nearEnemies(G.px + cos * range / 2, G.py + sin * range / 2, range / 2 + 80, _near);
-      for (const en of _near) {
-        const rx = en.x - G.px, ry = en.y - G.py;
-        const fwd = rx * cos + ry * sin;
-        if (fwd < 0 || fwd > range) continue;
-        const side = Math.abs(rx * -sin + ry * cos);
-        if (side < w + en.r) hitEnemy(en, dmg, e.el, crit, cos, sin, inst);
-      }
-      G.beams.push({ x: G.px, y: G.py, a: a0, len: range, w, color: EL.color, t: 0, life: 0.14 });
-      break;
-    }
-    case 'echoshot': {
-      aimed(count, 0.3);
-      aimed(count, 0.3, { delay: 0.22 });
-      break;
-    }
+function fireVolley() {
+  const s = G.stats, n = s.count;
+  const a0 = aimAngle();
+  const spread = Math.min(0.55, 0.085 * (n - 1));
+  for (let i = 0; i < n; i++) {
+    const a = n === 1 ? a0 : a0 - spread / 2 + spread * (i / (n - 1));
+    poolPush(G.pB, CAP.pB, {
+      x: G.px, y: G.py, vx: Math.cos(a) * s.speed, vy: Math.sin(a) * s.speed,
+      t: 0, life: 1.5 + s.bounce * 0.5, size: s.size, dmg: s.dmg,
+      pierce: s.pierce, bounce: s.bounce, homing: s.homing, hit: null,
+    });
   }
 }
 
-// ---------------------------------------------------------------------------
-// Damage & element mechanics
-// ---------------------------------------------------------------------------
-function hitEnemy(en, dmg, el, critCh, dx, dy, srcInst, noEcho) {
-  const EL = ELEMENTS[el];
-  const isCrit = Math.random() < critCh;
-  let d = dmg * (isCrit ? 2.2 : 1);
-  if (en.vulnT > 0) d *= 1 + en.vulnF;
-  if (EL.mech === 'crit' && ELEMENTS[el].key === 'chaos') d *= 1 + Math.random() * (isCrit ? 0 : 0.6);
-  en.hp -= d; G.dmgDealt += d;
-  dmgNumber(en.x, en.y - en.r, d, isCrit);
-
-  switch (EL.mech) {
-    case 'dot': en.dotDps = Math.max(en.dotDps, dmg * EL.p); en.dotT = 2; en.dotEl = el; break;
-    case 'slow': en.slowT = 1.5; en.slowF = Math.max(en.slowF, EL.p); break;
-    case 'chain': {
-      if (!noEcho) {
-        nearEnemies(en.x, en.y, 170, _near);
-        let best = null, bd = 170 * 170;
-        for (const o of _near) { if (o === en || o.hp <= 0) continue; const q = dist2(en.x, en.y, o.x, o.y); if (q < bd) { bd = q; best = o; } }
-        if (best) {
-          hitEnemy(best, dmg * EL.p, el, 0, 0, 0, srcInst, true);
-          G.beams.push({ x: en.x, y: en.y, a: Math.atan2(best.y - en.y, best.x - en.x), len: Math.sqrt(bd), w: 2, color: EL.color, t: 0, life: 0.1 });
-        }
-      }
-      break;
-    }
-    case 'vuln': en.vulnT = 2; en.vulnF = Math.max(en.vulnF, EL.p); break;
-    case 'knock': if (!en.boss) { en.kx += dx * EL.p; en.ky += dy * EL.p; } break;
-    case 'stun': if (Math.random() < EL.p && !en.boss) en.stunT = 0.5; break;
-    case 'leech': G.hp = Math.min(G.hpMax, G.hp + d * EL.p); break;
-    case 'aoe': {
-      if (!noEcho) {
-        nearEnemies(en.x, en.y, EL.p, _near);
-        for (const o of _near) if (o !== en && o.hp > 0 && dist2(en.x, en.y, o.x, o.y) < EL.p * EL.p) hitEnemy(o, dmg * 0.4, el, 0, 0, 0, srcInst, true);
-        burst(en.x, en.y, EL.color, 4, 120);
-      }
-      break;
-    }
-    case 'echo': if (!noEcho && Math.random() < EL.p) hitEnemy(en, dmg * 0.6, el, 0, dx, dy, srcInst, true); break;
-    case 'pull': {
-      if (!en.boss) {
-        nearEnemies(en.x, en.y, 110, _near);
-        for (const o of _near) {
-          if (o.boss) continue;
-          const dd = Math.hypot(en.x - o.x, en.y - o.y) || 1;
-          o.kx += (en.x - o.x) / dd * EL.p; o.ky += (en.y - o.y) / dd * EL.p;
-        }
-      }
-      break;
-    }
+function fireNova() {
+  const s = G.stats, n = Math.round(10 + 2 * s.novaLv);
+  const off = Math.random() * TAU;
+  for (let i = 0; i < n; i++) {
+    const a = off + TAU * i / n;
+    poolPush(G.pB, CAP.pB, {
+      x: G.px, y: G.py, vx: Math.cos(a) * 300, vy: Math.sin(a) * 300,
+      t: 0, life: 1.1, size: s.size * 0.9, dmg: s.dmg * 0.8,
+      pierce: s.pierce, bounce: 0, homing: 0, hit: null,
+    });
   }
-  if (en.hp <= 0) killEnemy(en, srcInst);
+}
+
+function fireLaser() {
+  const s = G.stats, t = nearestEnemy(G.px, G.py);
+  if (!t) return;
+  const a = Math.atan2(t.y - G.py, t.x - G.px);
+  const range = 620, w = 9 + s.laserLv;
+  const cos = Math.cos(a), sin = Math.sin(a);
+  const dmg = s.dmg * (1.2 + 0.35 * s.laserLv);
+  nearEnemies(G.px + cos * range / 2, G.py + sin * range / 2, range / 2 + 90, _near);
+  for (const en of _near) {
+    const rx = en.x - G.px, ry = en.y - G.py;
+    const fwd = rx * cos + ry * sin;
+    if (fwd < 0 || fwd > range) continue;
+    if (Math.abs(rx * -sin + ry * cos) < w + en.r) hitEnemy(en, dmg);
+  }
+  G.beams.push({ x: G.px, y: G.py, a, len: range, w, color: '#8af0ff', t: 0, life: 0.16 });
+}
+
+function bomb(x, y, r, dmg) {
+  SFX.bomb();
+  G.shake = Math.max(G.shake, 9);
+  for (let i = G.eB.length - 1; i >= 0; i--) {
+    if (dist2(G.eB[i].x, G.eB[i].y, x, y) < r * r) { G.eB[i] = G.eB[G.eB.length - 1]; G.eB.pop(); }
+  }
+  nearEnemies(x, y, r, _near);
+  for (const en of _near) if (en.hp > 0 && dist2(x, y, en.x, en.y) < (r + en.r) * (r + en.r)) hitEnemy(en, dmg);
+  burst(x, y, '#ffd24a', 22, 340);
+  G.beams.push({ ring: true, x, y, r, t: 0, life: 0.3, color: '#ffd24a' });
+}
+
+// ---------------------------------------------------------------------------
+// Damage
+// ---------------------------------------------------------------------------
+function hitEnemy(en, dmg) {
+  const s = G.stats;
+  const isCrit = Math.random() < s.crit;
+  const d = dmg * (isCrit ? 2.5 : 1);
+  en.hp -= d;
+  en.flash = 0.08;
+  G.dmgDealt += d;
+  if (s.lifesteal > 0) G.hp = Math.min(s.maxHp, G.hp + d * s.lifesteal);
+  if (isCrit) burst(en.x, en.y, '#ffd24a', 3, 150);
+  if (en.hp <= 0) killEnemy(en);
   return d;
 }
 
-function blast(x, y, r, dmg, el, crit, srcInst) {
-  nearEnemies(x, y, r, _near);
-  for (const en of _near) {
-    if (en.hp <= 0) continue;
-    if (dist2(x, y, en.x, en.y) < (r + en.r) * (r + en.r)) {
-      const dd = Math.hypot(en.x - x, en.y - y) || 1;
-      hitEnemy(en, dmg, el, crit, (en.x - x) / dd, (en.y - y) / dd, srcInst, true);
+function killEnemy(en) {
+  if (en.dead) return;
+  en.dead = true; en.hp = -1e9;
+  G.kills++;
+  SFX.kill();
+  burst(en.x, en.y, en.color, en.boss ? 50 : 6, en.boss ? 380 : 150);
+  const s = G.stats;
+  const gems = en.boss ? 30 : 1;
+  for (let i = 0; i < gems; i++) {
+    poolPush(G.gems, CAP.gems, { x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp / gems)), t: 0 });
+  }
+  if (s.splitShards > 0) {
+    for (let k = 0; k < s.splitShards; k++) {
+      const a = Math.random() * TAU;
+      poolPush(G.pB, CAP.pB, { x: en.x, y: en.y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, t: 0, life: 0.55, size: 3.5, dmg: s.dmg * 0.4, pierce: 0, bounce: 0, homing: 0, hit: null });
     }
   }
-  burst(x, y, ELEMENTS[el].color, 12, 200);
+  if (s.sparks) blast(en.x, en.y, 46, s.dmg * 0.5);
+  if (s.kilnova > 0 && Math.random() < s.kilnova) blast(en.x, en.y, 90, s.dmg * 1.2);
+  if (en.boss) {
+    G.bossAlive = null;
+    document.getElementById('bossBar').classList.remove('on');
+    G.shake = Math.max(G.shake, 12);
+    announce('BOSS DOWN — 討伐', '#ffd24a');
+  }
+  if (en.type === 'splitter' && !en.isChild) {
+    for (let i = 0; i < 2; i++) {
+      const c = spawnEnemy('chaser', en.x + rand(-12, 12), en.y + rand(-12, 12), 0.4);
+      if (c) { c.r = 8; c.isChild = true; }
+    }
+  }
+}
+
+function blast(x, y, r, dmg) {
+  nearEnemies(x, y, r, _near);
+  for (const en of _near) if (en.hp > 0 && dist2(x, y, en.x, en.y) < (r + en.r) * (r + en.r)) hitEnemy(en, dmg);
+  burst(x, y, '#ffb454', 6, 180);
 }
 
 // ---------------------------------------------------------------------------
 // Enemies & waves
 // ---------------------------------------------------------------------------
 const ETYPES = {
-  chaser:   { hp: 16,  speed: 95,  r: 12, dmg: 12, color: '#ff5a6b', xp: 1 },
-  shooter:  { hp: 22,  speed: 62,  r: 12, dmg: 10, color: '#ff9a4a', xp: 1 },
-  spinner:  { hp: 30,  speed: 44,  r: 14, dmg: 12, color: '#d05cff', xp: 2 },
-  tank:     { hp: 90,  speed: 30,  r: 20, dmg: 18, color: '#8a93b8', xp: 3 },
-  darter:   { hp: 14,  speed: 70,  r: 10, dmg: 12, color: '#4ad8ff', xp: 1 },
-  splitter: { hp: 26,  speed: 68,  r: 14, dmg: 12, color: '#9bd820', xp: 2 },
-  boss:     { hp: 750, speed: 40,  r: 42, dmg: 26, color: '#ff2a8a', xp: 40 },
+  chaser:   { hp: 16,  speed: 92,  r: 12, dmg: 12, color: '#ff6b5a', xp: 1 },
+  shooter:  { hp: 22,  speed: 60,  r: 12, dmg: 10, color: '#ffa04a', xp: 1 },
+  spinner:  { hp: 30,  speed: 42,  r: 14, dmg: 12, color: '#d05cff', xp: 2 },
+  tank:     { hp: 90,  speed: 30,  r: 20, dmg: 18, color: '#98a8c8', xp: 3 },
+  darter:   { hp: 14,  speed: 68,  r: 10, dmg: 12, color: '#4ad8ff', xp: 1 },
+  splitter: { hp: 26,  speed: 66,  r: 14, dmg: 12, color: '#9bd820', xp: 2 },
+  boss:     { hp: 800, speed: 40,  r: 42, dmg: 24, color: '#ff2a8a', xp: 45 },
 };
 function waveScale() { return 1 + G.wave * 0.30 + G.wave * G.wave * 0.035; }
 
 function spawnEnemy(type, x, y, hpMult) {
-  const T = ETYPES[type], s = waveScale();
+  const T = ETYPES[type], sc = waveScale();
   const en = {
-    type, x, y, r: T.r, hp: T.hp * s * (hpMult || 1), maxHp: T.hp * s * (hpMult || 1),
+    type, x, y, r: T.r, hp: T.hp * sc * (hpMult || 1), maxHp: T.hp * sc * (hpMult || 1),
     speed: T.speed * (1 + G.wave * 0.008), dmg: T.dmg * (1 + G.wave * 0.05),
-    color: T.color, xp: T.xp, t: rand(0, 9), shootT: rand(1, 2.4),
-    kx: 0, ky: 0, slowT: 0, slowF: 0, dotDps: 0, dotT: 0, dotEl: 0,
-    vulnT: 0, vulnF: 0, stunT: 0, boss: type === 'boss', dashT: 0, dvx: 0, dvy: 0,
-    ang: Math.random() * TAU, dead: false,
+    color: T.color, xp: T.xp, t: rand(0, 9), shootT: rand(1.2, 2.6),
+    boss: type === 'boss', dashT: 0, dvx: 0, dvy: 0, ang: Math.random() * TAU,
+    dead: false, flash: 0,
   };
   if (en.boss) {
-    en.name = pick(MYTH_BEINGS) + ' the Devourer';
-    en.xp = 40 + G.wave;
+    en.name = pick(MYTH_BEINGS) + ' THE DEVOURER';
+    en.xp = 45 + G.wave;
     G.bossAlive = en;
     document.getElementById('bossName').textContent = '― ' + en.name + ' ―';
     document.getElementById('bossBar').classList.add('on');
-    // a boss always spawns — make room if the horde is at cap
     if (G.enemies.length >= CAP.enemies) {
       const idx = G.enemies.findIndex(e => !e.boss);
       if (idx >= 0) G.enemies.splice(idx, 1);
@@ -529,7 +573,8 @@ function spawnEnemy(type, x, y, hpMult) {
     G.enemies.push(en);
     return en;
   }
-  if (G.enemies.length < CAP.enemies) G.enemies.push(en);
+  if (G.enemies.length >= CAP.enemies) return null;
+  G.enemies.push(en);
   return en;
 }
 
@@ -543,10 +588,9 @@ function edgeSpawnPos() {
 
 function updateWave(dt) {
   G.waveT += dt;
-  const waveLen = 22;
-  if (G.waveT >= waveLen) {
+  if (G.waveT >= 22) {
     G.waveT = 0; G.wave++;
-    floatText(W / 2, H * 0.25, 'WAVE ' + G.wave + (G.wave % 10 === 0 ? ' — 警告 BOSS' : ''), G.wave % 10 === 0 ? '#ff2a8a' : '#8aa0ff');
+    announce('WAVE ' + G.wave + (G.wave % 10 === 0 ? ' — BOSS' : ''), G.wave % 10 === 0 ? '#ff2a8a' : '#8aa0ff');
     if (G.wave % 10 === 0) {
       const p = edgeSpawnPos();
       spawnEnemy('boss', p.x, p.y, 1 + G.wave / 18);
@@ -554,7 +598,7 @@ function updateWave(dt) {
   }
   G.spawnT -= dt;
   if (G.spawnT <= 0) {
-    G.spawnT = clamp(1.5 - G.wave * 0.045, 0.3, 1.5) * (G.bossAlive ? 1.8 : 1);
+    G.spawnT = clamp(1.5 - G.wave * 0.045, 0.32, 1.5) * (G.bossAlive ? 1.8 : 1);
     const pack = 1 + ((G.wave / 5) | 0) + ((Math.random() * 2) | 0);
     const table = ['chaser', 'chaser', 'chaser', 'darter', 'shooter'];
     if (G.wave >= 3) table.push('shooter', 'splitter');
@@ -567,52 +611,16 @@ function updateWave(dt) {
   }
 }
 
-function killEnemy(en, srcInst) {
-  if (en.dead) return;   // guard: echo/chain/aoe can re-hit a dying enemy
-  en.dead = true;
-  en.hp = -1e9; // mark dead; removed in update sweep
-  G.kills++;
-  SFX.kill();
-  burst(en.x, en.y, en.color, en.boss ? 60 : 8, en.boss ? 380 : 160);
-  const gems = en.boss ? 30 : 1;
-  for (let i = 0; i < gems; i++) {
-    poolPush(G.gems, CAP.gems, {
-      x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r),
-      v: Math.max(1, Math.round(en.xp / gems)), t: 0,
-    });
-  }
-  if (en.boss) {
-    G.bossAlive = null;
-    document.getElementById('bossBar').classList.remove('on');
-    G.shake = Math.max(G.shake, 14);
-    floatText(en.x, en.y, '討伐 — BOSS DOWN', '#ffd24a');
-  }
-  // splitter spawns children
-  if (en.type === 'splitter' && !en.isChild) {
-    for (let i = 0; i < 2; i++) {
-      const c = spawnEnemy('chaser', en.x + rand(-12, 12), en.y + rand(-12, 12), 0.4);
-      c.r = 8; c.isChild = true;
-    }
-  }
-  // splitting variant shards + kill nova keystone
-  if (srcInst) {
-    const P = PowerPool[srcInst.id];
-    if (KS.killNova > 0 && Math.random() < KS.killNova) blast(en.x, en.y, 70, 18 * waveScale(), P.emitters[0].el, 0, null);
-  }
+function slowFactorAt(x, y) {
+  const s = G.stats;
+  if (s.slowR > 0 && dist2(x, y, G.px, G.py) < s.slowR * s.slowR) return 1 - s.slowEnemy;
+  return 1;
 }
 
-// ---------------------------------------------------------------------------
-// Enemy behaviors
-// ---------------------------------------------------------------------------
 function updateEnemy(en, dt) {
   en.t += dt;
-  // status effects
-  if (en.dotT > 0) { en.dotT -= dt; en.hp -= en.dotDps * dt; G.dmgDealt += en.dotDps * dt; if (en.hp <= 0) { killEnemy(en, null); return; } }
-  if (en.slowT > 0) en.slowT -= dt; else en.slowF = 0;
-  if (en.vulnT > 0) en.vulnT -= dt; else en.vulnF = 0;
-  if (en.stunT > 0) { en.stunT -= dt; en.kx *= 0.9; en.ky *= 0.9; return; }
-
-  const sp = en.speed * (1 - (en.slowT > 0 ? en.slowF : 0));
+  if (en.flash > 0) en.flash -= dt;
+  const sp = en.speed * slowFactorAt(en.x, en.y);
   const dx = G.px - en.x, dy = G.py - en.y, d = Math.hypot(dx, dy) || 1;
 
   switch (en.type) {
@@ -623,19 +631,19 @@ function updateEnemy(en, dt) {
       else if (d < 170) { en.x -= dx / d * sp * 0.7 * dt; en.y -= dy / d * sp * 0.7 * dt; }
       en.shootT -= dt;
       if (en.shootT <= 0 && d < 560) {
-        en.shootT = clamp(2.2 - G.wave * 0.03, 0.9, 2.2);
-        spawnEB({ x: en.x, y: en.y, vx: dx / d * 190, vy: dy / d * 190, dmg: en.dmg, size: 5, color: '#ff8a5a' });
+        en.shootT = clamp(2.3 - G.wave * 0.03, 1.0, 2.3);
+        spawnEB({ x: en.x, y: en.y, vx: dx / d * 175, vy: dy / d * 175, dmg: en.dmg, size: 5 });
       }
       break;
     case 'spinner':
       en.x += dx / d * sp * dt; en.y += dy / d * sp * dt;
       en.shootT -= dt;
       if (en.shootT <= 0) {
-        en.shootT = clamp(2.6 - G.wave * 0.03, 1.2, 2.6);
+        en.shootT = clamp(2.8 - G.wave * 0.03, 1.4, 2.8);
         const n = 8, off = en.ang; en.ang += 0.5;
         for (let i = 0; i < n; i++) {
           const a = off + TAU * i / n;
-          spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 130, vy: Math.sin(a) * 130, dmg: en.dmg, size: 5, color: '#d08aff' });
+          spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 120, vy: Math.sin(a) * 120, dmg: en.dmg, size: 5 });
         }
       }
       break;
@@ -643,75 +651,85 @@ function updateEnemy(en, dt) {
       en.x += dx / d * sp * dt; en.y += dy / d * sp * dt;
       en.shootT -= dt;
       if (en.shootT <= 0 && d < 480) {
-        en.shootT = 2.8;
+        en.shootT = 2.9;
         const a0 = Math.atan2(dy, dx);
         for (let i = -1; i <= 1; i++) {
           const a = a0 + i * 0.22;
-          spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150, dmg: en.dmg, size: 6, color: '#b8c8ff' });
+          spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 145, vy: Math.sin(a) * 145, dmg: en.dmg, size: 6 });
         }
       }
       break;
     case 'darter':
       en.dashT -= dt;
-      if (en.dashT <= 0) { en.dashT = rand(0.9, 1.6); en.dvx = dx / d * sp * 3.4; en.dvy = dy / d * sp * 3.4; }
+      if (en.dashT <= 0) { en.dashT = rand(0.9, 1.6); en.dvx = dx / d * sp * 3.2; en.dvy = dy / d * sp * 3.2; }
       en.dvx *= 0.96; en.dvy *= 0.96;
-      en.x += en.dvx * dt; en.y += en.dvy * dt;
+      en.x += en.dvx * dt * slowFactorAt(en.x, en.y); en.y += en.dvy * dt * slowFactorAt(en.x, en.y);
       break;
     case 'boss': {
       if (d > 260) { en.x += dx / d * sp * dt; en.y += dy / d * sp * dt; }
       en.shootT -= dt;
       if (en.shootT <= 0) {
         const phase = ((en.t * 0.5) | 0) % 3;
-        if (phase === 0) { // aimed fans
-          en.shootT = 0.55;
+        if (phase === 0) {
+          en.shootT = 0.6;
           const a0 = Math.atan2(dy, dx);
           for (let i = -2; i <= 2; i++) {
-            const a = a0 + i * 0.16;
-            spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 210, vy: Math.sin(a) * 210, dmg: en.dmg, size: 6, color: '#ff5aa0' });
+            const a = a0 + i * 0.17;
+            spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 195, vy: Math.sin(a) * 195, dmg: en.dmg, size: 6 });
           }
-        } else if (phase === 1) { // rings
-          en.shootT = 0.9;
-          const n = 18, off = en.ang; en.ang += 0.35;
+        } else if (phase === 1) {
+          en.shootT = 1.0;
+          const n = 16, off = en.ang; en.ang += 0.35;
           for (let i = 0; i < n; i++) {
             const a = off + TAU * i / n;
-            spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150, dmg: en.dmg, size: 5, color: '#c85aff' });
+            spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 140, vy: Math.sin(a) * 140, dmg: en.dmg, size: 5 });
           }
-        } else { // spiral stream
-          en.shootT = 0.08;
-          en.ang += 0.32;
+        } else {
+          en.shootT = 0.1;
+          en.ang += 0.30;
           for (let k = 0; k < 2; k++) {
             const a = en.ang + k * Math.PI;
-            spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 180, vy: Math.sin(a) * 180, dmg: en.dmg, size: 5, color: '#ff8ad8' });
+            spawnEB({ x: en.x, y: en.y, vx: Math.cos(a) * 170, vy: Math.sin(a) * 170, dmg: en.dmg, size: 5 });
           }
         }
       }
       break;
     }
   }
-  // knockback decay
-  en.x += en.kx * dt; en.y += en.ky * dt;
-  en.kx *= Math.pow(0.02, dt); en.ky *= Math.pow(0.02, dt);
-  // soft separation from other enemies is skipped for perf; enemies may overlap.
   en.x = clamp(en.x, -60, W + 60); en.y = clamp(en.y, -60, H + 60);
-
-  // contact damage
-  if (G.iT <= 0 && dist2(en.x, en.y, G.px, G.py) < (en.r + 9) * (en.r + 9)) hurtPlayer(en.dmg);
+  if (G.iT <= 0 && dist2(en.x, en.y, G.px, G.py) < (en.r + 8) * (en.r + 8)) hurtPlayer(en.dmg);
 }
 
+// ---------------------------------------------------------------------------
+// Player damage / shields / bombs / phoenix
+// ---------------------------------------------------------------------------
 function hurtPlayer(dmg) {
   if (G.iT > 0) return;
-  G.hp -= dmg; G.iT = 0.9; G.shake = Math.max(G.shake, 8);
+  const s = G.stats;
+  if (G.shield > 0) {
+    G.shield--;
+    G.iT = 0.6;
+    SFX.shield();
+    burst(G.px, G.py, '#6fd8ff', 10, 200);
+    for (let i = G.eB.length - 1; i >= 0; i--) {
+      if (dist2(G.eB[i].x, G.eB[i].y, G.px, G.py) < 80 * 80) { G.eB[i] = G.eB[G.eB.length - 1]; G.eB.pop(); }
+    }
+    if (s.guardian) blast(G.px, G.py, 160, s.dmg * 2.5);
+    return;
+  }
+  G.hp -= dmg;
+  G.iT = s.ghostT;
+  G.shake = Math.max(G.shake, 7);
   SFX.hurt();
-  burst(G.px, G.py, '#ff3a6b', 14, 220);
+  burst(G.px, G.py, '#ff3a6b', 12, 220);
+  if (s.bombR > 0 && G.bombT <= 0) { G.bombT = s.bombCd; bomb(G.px, G.py, s.bombR, s.dmg * 2); }
   if (G.hp <= 0) {
-    // Phoenix Soul aura — cheat death once per run
-    const hasPhoenix = !G.phoenixUsed && G.equipped.some(i => { const a = PowerPool[i.id].aura; return a && a.key === 'phoenix'; });
-    if (hasPhoenix) {
+    if (s.phoenix && !G.phoenixUsed) {
       G.phoenixUsed = true;
-      G.hp = G.hpMax * 0.5; G.iT = 2.5;
+      G.hp = s.maxHp * 0.5; G.iT = 2.5;
       G.eB.length = 0;
-      burst(G.px, G.py, '#ffb454', 80, 420);
-      floatText(G.px, G.py - 40, '不死鳥 — PHOENIX SOUL', '#ffb454');
+      burst(G.px, G.py, '#ffb454', 70, 420);
+      announce('PHOENIX — 不死鳥', '#ffb454');
       return;
     }
     G.hp = 0;
@@ -720,70 +738,13 @@ function hurtPlayer(dmg) {
 }
 
 // ---------------------------------------------------------------------------
-// Auras (Tier 5)
-// ---------------------------------------------------------------------------
-function updateAuras(dt) {
-  G.auraT += dt;
-  for (const inst of G.equipped) {
-    const P = PowerPool[inst.id];
-    if (!P.aura) continue;
-    const power = 14 * instDmgMult(inst) * KS.dmg * waveScale() * 0.35;
-    switch (P.aura.key) {
-      case 'blades': {
-        const R = 74, n = 3;
-        for (let i = 0; i < n; i++) {
-          const a = G.auraT * 3.2 + TAU * i / n;
-          const bx = G.px + Math.cos(a) * R, by = G.py + Math.sin(a) * R;
-          nearEnemies(bx, by, 20, _near);
-          for (const en of _near) if (en.hp > 0 && dist2(bx, by, en.x, en.y) < (16 + en.r) * (16 + en.r)) hitEnemy(en, power * dt * 8, P.emitters[0].el, 0, 0, 0, inst, true);
-        }
-        break;
-      }
-      case 'halo': {
-        nearEnemies(G.px, G.py, 105, _near);
-        for (const en of _near) if (en.hp > 0 && dist2(G.px, G.py, en.x, en.y) < 105 * 105) hitEnemy(en, power * dt * 4, P.emitters[0].el, 0, 0, 0, inst, true);
-        break;
-      }
-      case 'storm': {
-        if ((G.auraT % 0.8) < dt) {
-          nearEnemies(G.px, G.py, 280, _near);
-          const t = _near.filter(e => e.hp > 0);
-          if (t.length) {
-            const en = pick(t);
-            hitEnemy(en, power * 3, P.emitters[0].el, 0.2, 0, 0, inst, true);
-            G.beams.push({ x: G.px, y: G.py, a: Math.atan2(en.y - G.py, en.x - G.px), len: Math.hypot(en.x - G.px, en.y - G.py), w: 2.5, color: '#ffe94a', t: 0, life: 0.12 });
-          }
-        }
-        break;
-      }
-      case 'frost': {
-        nearEnemies(G.px, G.py, 140, _near);
-        for (const en of _near) if (dist2(G.px, G.py, en.x, en.y) < 140 * 140) { en.slowT = Math.max(en.slowT, 0.3); en.slowF = Math.max(en.slowF, 0.45); }
-        break;
-      }
-      case 'gravity': {
-        nearEnemies(G.px, G.py, 210, _near);
-        for (const en of _near) {
-          if (en.boss) continue;
-          const d = Math.hypot(G.px - en.x, G.py - en.y) || 1;
-          if (d < 210 && d > 60) { en.kx += (G.px - en.x) / d * 26 * dt * 60; en.ky += (G.py - en.y) / d * 26 * dt * 60; }
-          if (d <= 210 && en.hp > 0) hitEnemy(en, power * dt * 1.5, P.emitters[0].el, 0, 0, 0, inst, true);
-        }
-        break;
-      }
-      // phoenix handled in hurtPlayer
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Simulation
 // ---------------------------------------------------------------------------
 function update(dt) {
   G.time += dt;
-  KS = keystones();
+  const s = G.stats;
 
-  // ---- player movement
+  // movement
   const up = keys.has('w') || keys.has('arrowup'), dn = keys.has('s') || keys.has('arrowdown');
   const lf = keys.has('a') || keys.has('arrowleft'), rt = keys.has('d') || keys.has('arrowright');
   G.focus = keys.has('shift');
@@ -792,16 +753,17 @@ function update(dt) {
     const m = Math.hypot(mx, my);
     mx /= m; my /= m;
     G.faceX = mx; G.faceY = my;
-    const spd = 265 * KS.move * (G.focus ? 0.45 : 1);
+    const spd = s.moveSpd * (G.focus ? 0.45 : 1);
     G.px = clamp(G.px + mx * spd * dt, 14, W - 14);
     G.py = clamp(G.py + my * spd * dt, 14, H - 14);
   }
   if (G.iT > 0) G.iT -= dt;
+  if (s.regen > 0) G.hp = Math.min(s.maxHp, G.hp + s.regen * dt);
 
   rebuildGrid();
   updateWave(dt);
 
-  // ---- enemies
+  // enemies
   for (const en of G.enemies) if (en.hp > 0) updateEnemy(en, dt);
   for (let i = G.enemies.length - 1; i >= 0; i--) if (G.enemies[i].hp <= 0) {
     const en = G.enemies[i];
@@ -809,142 +771,110 @@ function update(dt) {
     if (en === G.bossAlive) { G.bossAlive = null; document.getElementById('bossBar').classList.remove('on'); }
   }
 
-  // ---- fire equipped powers
-  for (const inst of G.equipped) {
-    const P = PowerPool[inst.id];
-    for (let ei = 0; ei < P.emitters.length; ei++) {
-      inst.accs[ei] += dt * P.emitters[ei].rate * instRateMult(inst) * KS.rate;
-      let guard = 0;
-      while (inst.accs[ei] >= 1 && guard++ < 8) { inst.accs[ei] -= 1; fireEmitter(inst, ei); }
-      if (inst.accs[ei] > 8) inst.accs[ei] = 8;
+  // main gun
+  G.gunAcc += dt * s.rate;
+  let guard = 0;
+  while (G.gunAcc >= 1 && guard++ < 6) { G.gunAcc -= 1; fireVolley(); }
+  if (G.gunAcc > 6) G.gunAcc = 6;
+
+  // systems
+  if (s.novaLv > 0) { G.novaT -= dt; if (G.novaT <= 0) { G.novaT = s.novaCd; fireNova(); } }
+  if (s.laserLv > 0) { G.laserT -= dt; if (G.laserT <= 0) { G.laserT = s.laserCd; fireLaser(); } }
+  if (s.echo) { G.echoT -= dt; if (G.echoT <= 0) { G.echoT = 6; fireVolley(); G.beams.push({ ring: true, x: G.px, y: G.py, r: 40, t: 0, life: 0.2, color: '#8af0ff' }); } }
+  if (s.ripple) { G.rippleT -= dt; if (G.rippleT <= 0) { G.rippleT = 12; G.rippleActive = 3; G.beams.push({ ring: true, x: G.px, y: G.py, r: Math.max(W, H), t: 0, life: 0.5, color: '#8affff' }); } }
+  if (s.barrage) {
+    G.barrageT -= dt;
+    if (G.barrageT <= 0) {
+      G.barrageT = 18;
+      for (let i = 0; i < 6; i++) {
+        const t = G.enemies.length ? pick(G.enemies) : { x: rand(60, W - 60), y: rand(60, H - 60) };
+        G.zones.push({ x: t.x + rand(-40, 40), y: t.y + rand(-40, 40), r: 90, t: 0, tel: 0.6 + i * 0.12 });
+      }
     }
   }
-  updateAuras(dt);
+  if (G.rippleActive > 0) G.rippleActive -= dt;
+  if (G.bombT > 0) G.bombT -= dt;
 
-  // ---- player bullets
+  // shield regen
+  if (s.shieldMax > 0 && G.shield < s.shieldMax) {
+    G.shieldT += dt;
+    if (G.shieldT >= s.shieldRegen) { G.shieldT = 0; G.shield++; SFX.shield(); }
+  } else G.shieldT = 0;
+
+  // orbitals
+  if (s.orbitals > 0) {
+    const R = 72, n = s.orbitals;
+    for (let i = 0; i < n; i++) {
+      if (G.bladeCd[i] > 0) { G.bladeCd[i] -= dt; continue; }
+      const a = G.time * 3 + TAU * i / n;
+      const bx = G.px + Math.cos(a) * R, by = G.py + Math.sin(a) * R;
+      nearEnemies(bx, by, 24, _near);
+      for (const en of _near) {
+        if (en.hp > 0 && dist2(bx, by, en.x, en.y) < (16 + en.r) * (16 + en.r)) {
+          hitEnemy(en, s.dmg * 0.8);
+          G.bladeCd[i] = 0.28;
+          break;
+        }
+      }
+    }
+  }
+
+  // player bullets
   for (let i = G.pB.length - 1; i >= 0; i--) {
     const b = G.pB[i];
-    if (b.delay > 0) { b.delay -= dt; continue; }
     b.t += dt;
     let dead = b.t >= b.life;
-
-    if (b.orbit) { // orbital
-      const o = b.orbit;
-      o.r += (o.tr - o.r) * dt * 3;
-      o.a += o.av * dt;
-      b.x = G.px + Math.cos(o.a) * o.r; b.y = G.py + Math.sin(o.a) * o.r;
-      if (b.cd > 0) b.cd -= dt;
-    } else if (b.kind === 2) { // nova — expanding ring
-      b.size += b.grow * dt;
-    } else if (b.kind === 4) { // boomerang
-      if (b.t > b.life * 0.42 && !b.ret) { b.ret = true; }
-      if (b.ret) {
-        const dx = G.px - b.x, dy = G.py - b.y, d = Math.hypot(dx, dy) || 1;
-        const sp = Math.hypot(b.vx, b.vy) * 1.02 + 8;
-        b.vx = dx / d * sp; b.vy = dy / d * sp;
-        if (d < 16) dead = true;
+    if (b.homing > 0) {
+      const t = nearestEnemy(b.x, b.y);
+      if (t) {
+        const want = Math.atan2(t.y - b.y, t.x - b.x), cur = Math.atan2(b.vy, b.vx);
+        let da = want - cur;
+        while (da > Math.PI) da -= TAU; while (da < -Math.PI) da += TAU;
+        const turn = clamp(da, -b.homing * dt, b.homing * dt);
+        const spd = Math.hypot(b.vx, b.vy);
+        b.vx = Math.cos(cur + turn) * spd; b.vy = Math.sin(cur + turn) * spd;
       }
-      b.x += b.vx * dt; b.y += b.vy * dt;
-    } else if (b.kind === 5) { // mine
-      if (b.phase > 0) b.phase -= dt;
-      else {
-        nearEnemies(b.x, b.y, 52, _near);
-        for (const en of _near) if (en.hp > 0 && dist2(b.x, b.y, en.x, en.y) < (52 + en.r) * (52 + en.r)) {
-          blast(b.x, b.y, 64, b.dmg, b.el, b.crit, b.src); dead = true; break;
-        }
-      }
-    } else {
-      if (b.homing > 0) {
-        const t = nearestEnemy(b.x, b.y);
-        if (t) {
-          const want = Math.atan2(t.y - b.y, t.x - b.x), cur = Math.atan2(b.vy, b.vx);
-          let da = want - cur;
-          while (da > Math.PI) da -= TAU; while (da < -Math.PI) da += TAU;
-          const turn = clamp(da, -b.homing * dt, b.homing * dt);
-          const sp = Math.hypot(b.vx, b.vy);
-          b.vx = Math.cos(cur + turn) * sp; b.vy = Math.sin(cur + turn) * sp;
-        }
-      }
-      b.x += b.vx * dt; b.y += b.vy * dt;
-      if (b.kind === 1) { // wave / serpent wobble
-        b.phase += dt * 9;
-        const px = -b.dirY, py = b.dirX;
-        const w = Math.cos(b.phase) * b.amp * dt;
-        b.x += px * w; b.y += py * w;
-      }
-      if (b.kind === 3 && b.t > b.life * 0.6) { // flak detonation
-        for (let k = 0; k < 6; k++) {
-          const a = Math.random() * TAU;
-          spawnPB({ x: b.x, y: b.y, vx: Math.cos(a) * 300, vy: Math.sin(a) * 300, dmg: b.dmg * 0.45, size: 3.5, el: b.el, life: 0.5, crit: b.crit, src: b.src });
-        }
-        dead = true;
-      }
-      if (b.x < -40 || b.x > W + 40 || b.y < -40 || b.y > H + 40) dead = true;
     }
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.bounce > 0) {
+      if ((b.x < 6 && b.vx < 0) || (b.x > W - 6 && b.vx > 0)) { b.vx = -b.vx; b.bounce--; }
+      if ((b.y < 6 && b.vy < 0) || (b.y > H - 6 && b.vy > 0)) { b.vy = -b.vy; b.bounce--; }
+    } else if (b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30) dead = true;
 
-    // collisions (mines handle their own proximity trigger above)
     if (!dead) {
-      if (b.kind === 2) { // nova ring band
-        nearEnemies(b.x, b.y, b.size + 40, _near);
-        for (const en of _near) {
-          if (en.hp <= 0 || b.hitSet.includes(en)) continue;
-          const d = Math.hypot(en.x - b.x, en.y - b.y);
-          if (Math.abs(d - b.size) < en.r + 12) {
-            b.hitSet.push(en);
-            const dd = d || 1;
-            hitEnemy(en, b.dmg, b.el, b.crit, (en.x - b.x) / dd, (en.y - b.y) / dd, b.src);
-          }
-        }
-      } else if (b.kind !== 5) {
-        nearEnemies(b.x, b.y, b.size + 26, _near);
-        for (const en of _near) {
-          if (en.hp <= 0) continue;
-          if (dist2(b.x, b.y, en.x, en.y) < (b.size + en.r) * (b.size + en.r)) {
-            if (b.orbit) {
-              if (b.cd > 0) continue;
-              b.cd = 0.3;
-              const dv = Math.hypot(en.x - G.px, en.y - G.py) || 1;
-              hitEnemy(en, b.dmg, b.el, b.crit, (en.x - G.px) / dv, (en.y - G.py) / dv, b.src);
-              continue;
-            }
-            if (b.hit && b.hit.includes(en)) continue;
-            const sp = Math.hypot(b.vx, b.vy) || 1;
-            const wasAlive = en.hp > 0;
-            hitEnemy(en, b.dmg, b.el, b.crit, b.vx / sp, b.vy / sp, b.src);
-            if (wasAlive && en.hp <= 0 && b.split) { // splitting variant shards
-              for (let k = 0; k < 2; k++) {
-                const a = Math.random() * TAU;
-                spawnPB({ x: en.x, y: en.y, vx: Math.cos(a) * 280, vy: Math.sin(a) * 280, dmg: b.dmg * 0.4, size: 3.5, el: b.el, life: 0.6, src: b.src });
-              }
-            }
-            if (b.pierce > 0) { b.pierce--; (b.hit || (b.hit = [])).push(en); }
-            else { dead = true; break; }
-          }
+      nearEnemies(b.x, b.y, b.size + 26, _near);
+      for (const en of _near) {
+        if (en.hp <= 0) continue;
+        if (dist2(b.x, b.y, en.x, en.y) < (b.size + en.r) * (b.size + en.r)) {
+          if (b.hit && b.hit.includes(en)) continue;
+          hitEnemy(en, b.dmg);
+          if (b.pierce > 0) { b.pierce--; (b.hit || (b.hit = [])).push(en); }
+          else { dead = true; break; }
         }
       }
     }
-
-    if (dead) {
-      if (b.volatile && b.kind !== 3) blast(b.x, b.y, 36, b.dmg * 0.6, b.el, 0, b.src);
-      G.pB[i] = G.pB[G.pB.length - 1]; G.pB.pop();
-    }
+    if (dead) { G.pB[i] = G.pB[G.pB.length - 1]; G.pB.pop(); }
   }
 
-  // ---- zones (meteors)
+  // barrage zones
   for (let i = G.zones.length - 1; i >= 0; i--) {
     const z = G.zones[i];
     z.t += dt;
     if (z.t >= z.tel) {
-      blast(z.x, z.y, z.r, z.dmg, z.el, z.crit, z.src);
-      G.shake = Math.max(G.shake, 3);
+      bomb(z.x, z.y, z.r, s.dmg * 2);
       G.zones.splice(i, 1);
     }
   }
 
-  // ---- enemy bullets
+  // enemy bullets (slowed by slow field / graze / ripple)
+  const grazeMult = 1 - s.grazeSlow;
+  const rippleMult = G.rippleActive > 0 ? 0.45 : 1;
   for (let i = G.eB.length - 1; i >= 0; i--) {
     const b = G.eB[i];
-    b.t += dt; b.x += b.vx * dt; b.y += b.vy * dt;
+    b.t += dt;
+    let m = grazeMult * rippleMult;
+    if (s.slowR > 0 && dist2(b.x, b.y, G.px, G.py) < s.slowR * s.slowR) m *= 1 - s.slowBullet;
+    b.x += b.vx * dt * m; b.y += b.vy * dt * m;
     let dead = b.t >= b.life || b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30;
     if (!dead && G.iT <= 0 && dist2(b.x, b.y, G.px, G.py) < (b.size + G.pr) * (b.size + G.pr)) {
       hurtPlayer(b.dmg); dead = true;
@@ -952,126 +882,110 @@ function update(dt) {
     if (dead) { G.eB[i] = G.eB[G.eB.length - 1]; G.eB.pop(); }
   }
 
-  // ---- gems
-  const magR = 80 * KS.magnet;
+  // gems
+  const magR = s.magnetR;
   for (let i = G.gems.length - 1; i >= 0; i--) {
     const g = G.gems[i];
     g.t += dt;
     const d2 = dist2(g.x, g.y, G.px, G.py);
     if (d2 < magR * magR) {
       const d = Math.sqrt(d2) || 1;
-      const sp = 460;
-      g.x += (G.px - g.x) / d * sp * dt; g.y += (G.py - g.y) / d * sp * dt;
+      g.x += (G.px - g.x) / d * 480 * dt; g.y += (G.py - g.y) / d * 480 * dt;
     }
-    if (d2 < 18 * 18) {
-      G.xp += g.v * KS.xp; SFX.gem();
+    if (d2 < 20 * 20) {
+      G.xp += g.v;
+      if (s.gemHeal > 0) G.hp = Math.min(s.maxHp, G.hp + s.gemHeal);
+      SFX.gem();
       G.gems.splice(i, 1);
       while (G.xp >= G.xpNeed) { G.xp -= G.xpNeed; G.level++; G.xpNeed = xpNeed(G.level); G.pendingLevels++; }
     }
   }
   if (G.pendingLevels > 0 && state === ST.PLAY) openLevelUp();
 
-  // ---- particles / floats / beams
+  // fusion banners (level-ups never wait on these; queued banners play faster)
+  if (G.bannerT > 0) G.bannerT -= dt;
+  if (G.bannerT <= 0 && G.bannerQ.length) {
+    const f = G.bannerQ.shift();
+    G.bannerT = G.bannerQ.length ? 1.4 : 2.6;
+    const el = document.getElementById('fusionBanner');
+    el.querySelector('.fTitle').textContent = f.title;
+    el.querySelector('.fSub').textContent = f.subtitle;
+    el.classList.remove('show'); void el.offsetWidth; // restart animation
+    el.classList.add('show');
+  }
+
+  // particles / floats / beams
   for (let i = G.parts.length - 1; i >= 0; i--) {
     const p = G.parts[i];
-    p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.94; p.vy *= 0.94;
+    p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.93; p.vy *= 0.93;
     if (p.t >= p.life) { G.parts[i] = G.parts[G.parts.length - 1]; G.parts.pop(); }
   }
   for (let i = G.floats.length - 1; i >= 0; i--) {
     const f = G.floats[i];
-    f.t += dt; f.y -= 34 * dt;
+    f.t += dt; f.y -= 30 * dt;
     if (f.t >= f.life) G.floats.splice(i, 1);
   }
   for (let i = G.beams.length - 1; i >= 0; i--) {
-    const bm = G.beams[i];
-    bm.t += dt;
-    if (bm.t >= bm.life) G.beams.splice(i, 1);
+    if ((G.beams[i].t += dt) >= G.beams[i].life) G.beams.splice(i, 1);
   }
-
   if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30);
 }
 
 // ---------------------------------------------------------------------------
-// Render
+// Render — draw order is the readability contract
 // ---------------------------------------------------------------------------
 function render() {
-  ctx.fillStyle = '#07080f';
+  ctx.fillStyle = '#0b0e1a';
   ctx.fillRect(0, 0, W, H);
 
   ctx.save();
   if (G.shake > 0) ctx.translate(rand(-G.shake, G.shake) * 0.5, rand(-G.shake, G.shake) * 0.5);
 
-  // grid backdrop
-  ctx.strokeStyle = 'rgba(90, 110, 200, 0.07)';
+  // subtle grid
+  ctx.strokeStyle = 'rgba(110, 130, 220, 0.05)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  const gs = 56, ox = (G.time * 8) % gs;
+  const gs = 64, ox = (G.time * 6) % gs;
   for (let x = -ox; x < W; x += gs) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
   for (let y = -ox; y < H; y += gs) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
   ctx.stroke();
 
-  // zones (meteor telegraphs)
+  const s = G.stats;
+
+  // slow field
+  if (s && s.slowR > 0) {
+    ctx.fillStyle = 'rgba(130, 240, 255, 0.05)';
+    ctx.beginPath(); ctx.arc(G.px, G.py, s.slowR, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(130, 240, 255, 0.22)';
+    ctx.beginPath(); ctx.arc(G.px, G.py, s.slowR, 0, TAU); ctx.stroke();
+  }
+
+  // barrage telegraphs
   for (const z of G.zones) {
     const k = z.t / z.tel;
-    ctx.strokeStyle = z.color; ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#ffd24a'; ctx.globalAlpha = 0.6;
     ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, TAU); ctx.stroke();
-    ctx.globalAlpha = 0.25;
-    ctx.fillStyle = z.color;
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = '#ffd24a';
     ctx.beginPath(); ctx.arc(z.x, z.y, z.r * k, 0, TAU); ctx.fill();
     ctx.globalAlpha = 1;
   }
 
   // gems
-  ctx.fillStyle = '#54d68a';
-  for (const g of G.gems) {
-    const s = 4 + Math.sin(g.t * 6) * 1;
-    ctx.beginPath();
-    ctx.moveTo(g.x, g.y - s); ctx.lineTo(g.x + s, g.y); ctx.lineTo(g.x, g.y + s); ctx.lineTo(g.x - s, g.y);
-    ctx.fill();
-  }
+  const gspr = gemSprite();
+  for (const g of G.gems) ctx.drawImage(gspr.c, g.x - gspr.R, g.y - gspr.R);
 
-  // player bullets (sprites)
+  // player bullets (quiet cyan)
   for (const b of G.pB) {
-    if (b.delay > 0) continue;
-    const color = ELEMENTS[b.el].color;
-    if (b.kind === 2) { // nova ring
-      ctx.strokeStyle = color; ctx.lineWidth = 10; ctx.globalAlpha = clamp(1 - b.t / b.life, 0, 1) * 0.8;
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.size, 0, TAU); ctx.stroke();
-      ctx.globalAlpha = 1; ctx.lineWidth = 1;
-      continue;
-    }
-    const s = bulletSprite(color, b.size);
-    ctx.drawImage(s.c, b.x - s.R, b.y - s.R);
-    if (b.kind === 5 && b.phase <= 0) { // armed mine blink
-      ctx.strokeStyle = color; ctx.globalAlpha = 0.4 + 0.4 * Math.sin(b.t * 12);
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.size + 5, 0, TAU); ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
+    const spr = pBulletSprite(b.size);
+    ctx.drawImage(spr.c, b.x - spr.R, b.y - spr.R);
   }
 
-  // beams
-  for (const bm of G.beams) {
-    const k = 1 - bm.t / bm.life;
-    ctx.save();
-    ctx.translate(bm.x, bm.y); ctx.rotate(bm.a);
-    ctx.globalAlpha = k * 0.85;
-    ctx.fillStyle = bm.color;
-    ctx.fillRect(0, -bm.w * k, bm.len, bm.w * 2 * k);
-    ctx.globalAlpha = k * 0.5;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, -bm.w * k * 0.35, bm.len, bm.w * 0.7 * k);
-    ctx.restore();
-    ctx.globalAlpha = 1;
-  }
-
-  // enemies
+  // enemies — solid, outlined, flash on hit
   for (const en of G.enemies) {
     ctx.save();
     ctx.translate(en.x, en.y);
-    ctx.rotate(en.t * (en.boss ? 0.6 : 1.4));
-    ctx.strokeStyle = en.color;
-    ctx.fillStyle = en.color + '33';
-    ctx.lineWidth = en.boss ? 3 : 2;
+    ctx.rotate(en.t * (en.boss ? 0.5 : 1.2));
     const sides = { chaser: 3, shooter: 4, spinner: 5, tank: 6, darter: 3, splitter: 8, boss: 7 }[en.type] || 4;
     ctx.beginPath();
     for (let i = 0; i < sides; i++) {
@@ -1080,85 +994,107 @@ function render() {
       if (i === 0) ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
       else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
     }
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-    // status tint
-    if (en.slowT > 0) { ctx.strokeStyle = '#6fd8ff'; ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(0, 0, en.r + 3, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1; }
-    if (en.dotT > 0) { ctx.fillStyle = ELEMENTS[en.dotEl].color; ctx.globalAlpha = 0.35 + 0.2 * Math.sin(en.t * 10); ctx.beginPath(); ctx.arc(0, 0, en.r * 0.5, 0, TAU); ctx.fill(); ctx.globalAlpha = 1; }
+    ctx.closePath();
+    ctx.fillStyle = en.flash > 0 ? '#ffffff' : en.color;
+    ctx.globalAlpha = en.flash > 0 ? 0.95 : 0.8;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = en.flash > 0 ? '#ffffff' : 'rgba(255,255,255,.55)';
+    ctx.lineWidth = en.boss ? 3 : 1.5;
+    ctx.stroke();
     ctx.restore();
-    // hp bar for tough enemies
     if (en.maxHp > 60 && en.hp < en.maxHp && !en.boss) {
-      ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(en.x - 16, en.y - en.r - 9, 32, 4);
+      ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(en.x - 16, en.y - en.r - 9, 32, 4);
       ctx.fillStyle = '#ff5a6b'; ctx.fillRect(en.x - 16, en.y - en.r - 9, 32 * clamp(en.hp / en.maxHp, 0, 1), 4);
     }
   }
 
-  // enemy bullets
-  for (const b of G.eB) {
-    const s = bulletSprite(b.color, b.size);
-    ctx.drawImage(s.c, b.x - s.R, b.y - s.R);
-  }
-
-  // auras visuals
-  for (const inst of G.equipped) {
-    const P = PowerPool[inst.id];
-    if (!P.aura) continue;
-    const col = ELEMENTS[P.emitters[0].el].color;
-    ctx.globalAlpha = 0.16;
-    if (P.aura.key === 'halo') { ctx.strokeStyle = col; ctx.lineWidth = 20; ctx.beginPath(); ctx.arc(G.px, G.py, 95, 0, TAU); ctx.stroke(); ctx.lineWidth = 1; }
-    if (P.aura.key === 'frost') { ctx.fillStyle = '#6fd8ff'; ctx.beginPath(); ctx.arc(G.px, G.py, 140, 0, TAU); ctx.fill(); }
-    if (P.aura.key === 'gravity') { ctx.strokeStyle = '#a88aff'; ctx.beginPath(); ctx.arc(G.px, G.py, 210 - (G.auraT * 60 % 150), 0, TAU); ctx.stroke(); }
-    ctx.globalAlpha = 1;
-    if (P.aura.key === 'blades') {
-      ctx.fillStyle = col;
-      for (let i = 0; i < 3; i++) {
-        const a = G.auraT * 3.2 + TAU * i / 3;
-        const bx = G.px + Math.cos(a) * 74, by = G.py + Math.sin(a) * 74;
-        ctx.save(); ctx.translate(bx, by); ctx.rotate(a + Math.PI / 2);
-        ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(5, 8); ctx.lineTo(-5, 8); ctx.closePath(); ctx.fill();
-        ctx.restore();
-      }
+  // orbital blades
+  if (s && s.orbitals > 0) {
+    ctx.fillStyle = '#bfe8ff';
+    for (let i = 0; i < s.orbitals; i++) {
+      const a = G.time * 3 + TAU * i / s.orbitals;
+      const bx = G.px + Math.cos(a) * 72, by = G.py + Math.sin(a) * 72;
+      ctx.save(); ctx.translate(bx, by); ctx.rotate(a + Math.PI / 2);
+      ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(5, 8); ctx.lineTo(-5, 8); ctx.closePath(); ctx.fill();
+      ctx.restore();
     }
   }
 
-  // player
+  // beams / rings
+  for (const bm of G.beams) {
+    const k = 1 - bm.t / bm.life;
+    if (bm.ring) {
+      ctx.strokeStyle = bm.color; ctx.globalAlpha = k * 0.7; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(bm.x, bm.y, bm.r * (1 - k * 0.4), 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.lineWidth = 1;
+      continue;
+    }
+    ctx.save();
+    ctx.translate(bm.x, bm.y); ctx.rotate(bm.a);
+    ctx.globalAlpha = k * 0.85;
+    ctx.fillStyle = bm.color;
+    ctx.fillRect(0, -bm.w * k, bm.len, bm.w * 2 * k);
+    ctx.globalAlpha = k * 0.6;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, -bm.w * k * 0.3, bm.len, bm.w * 0.6 * k);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  // player — bright, unmissable
   if (G.hp > 0) {
-    const blink = G.iT > 0 && (G.time * 14 | 0) % 2 === 0;
+    const blink = G.iT > 0 && ((G.time * 14) | 0) % 2 === 0;
+    if (s && s.shieldMax > 0) {
+      for (let i = 0; i < G.shield; i++) {
+        const a = G.time * 1.6 + TAU * i / Math.max(1, s.shieldMax);
+        ctx.fillStyle = '#6fd8ff';
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.arc(G.px + Math.cos(a) * 26, G.py + Math.sin(a) * 26, 3.4, 0, TAU); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
     if (!blink) {
       ctx.save();
       ctx.translate(G.px, G.py);
-      const ang = Math.atan2(G.faceY, G.faceX) + Math.PI / 2;
-      ctx.rotate(ang);
-      // scarf trail
-      ctx.strokeStyle = '#ff3a6b'; ctx.lineWidth = 3; ctx.globalAlpha = 0.8;
-      ctx.beginPath(); ctx.moveTo(0, 8); ctx.quadraticCurveTo(Math.sin(G.time * 9) * 6, 18, Math.sin(G.time * 7) * 10, 26); ctx.stroke();
-      ctx.globalAlpha = 1;
-      // body
-      ctx.fillStyle = '#e8ecff'; ctx.strokeStyle = '#8aa0ff'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(8, 9); ctx.lineTo(0, 4); ctx.lineTo(-8, 9); ctx.closePath();
+      ctx.rotate(Math.atan2(G.faceY, G.faceX) + Math.PI / 2);
+      ctx.shadowColor = '#8ad8ff'; ctx.shadowBlur = 14;
+      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#6fd8ff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(9, 10); ctx.lineTo(0, 5); ctx.lineTo(-9, 10); ctx.closePath();
       ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0;
       ctx.restore();
     }
-    if (G.focus) { // hitbox
-      ctx.fillStyle = '#ff2a5a';
-      ctx.beginPath(); ctx.arc(G.px, G.py, G.pr, 0, TAU); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,.7)';
-      ctx.beginPath(); ctx.arc(G.px, G.py, G.pr + 2.5, 0, TAU); ctx.stroke();
+    // hitbox — faint always, bright in focus
+    ctx.fillStyle = '#ff2a5a';
+    ctx.globalAlpha = G.focus ? 1 : 0.55;
+    ctx.beginPath(); ctx.arc(G.px, G.py, G.pr, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (G.focus) {
+      ctx.strokeStyle = 'rgba(255,255,255,.8)';
+      ctx.beginPath(); ctx.arc(G.px, G.py, G.pr + 3, 0, TAU); ctx.stroke();
     }
+  }
+
+  // ENEMY BULLETS — always on top: if it can kill you, you can see it
+  for (const b of G.eB) {
+    const spr = eBulletSprite(b.size);
+    ctx.drawImage(spr.c, b.x - spr.R, b.y - spr.R);
   }
 
   // particles
   for (const p of G.parts) {
-    ctx.globalAlpha = clamp(1 - p.t / p.life, 0, 1);
+    ctx.globalAlpha = clamp(1 - p.t / p.life, 0, 1) * 0.9;
     ctx.fillStyle = p.color;
     ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
   }
   ctx.globalAlpha = 1;
 
-  // floating text
+  // announcements
   ctx.textAlign = 'center';
+  ctx.font = 'bold 16px Segoe UI, sans-serif';
   for (const f of G.floats) {
     ctx.globalAlpha = clamp(1 - f.t / f.life, 0, 1);
-    ctx.font = f.small ? '11px Segoe UI, sans-serif' : 'bold 15px Segoe UI, sans-serif';
     ctx.fillStyle = f.color;
     ctx.fillText(f.txt, f.x, f.y);
   }
@@ -1166,172 +1102,93 @@ function render() {
 
   ctx.restore();
 
-  // vignette
-  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.38, W / 2, H / 2, Math.max(W, H) * 0.72);
+  // faint vignette only
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.5, W / 2, H / 2, Math.max(W, H) * 0.78);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(0,0,10,0.55)');
+  vg.addColorStop(1, 'rgba(0,0,12,0.30)');
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, W, H);
 }
 
 // ---------------------------------------------------------------------------
-// HUD / UI
+// HUD / overlays
 // ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 function updateHUD() {
-  $('hpBar').firstElementChild.style.width = clamp(G.hp / G.hpMax * 100, 0, 100) + '%';
+  const s = G.stats;
+  $('hpBar').firstElementChild.style.width = clamp(G.hp / s.maxHp * 100, 0, 100) + '%';
   $('xpBar').firstElementChild.style.width = clamp(G.xp / G.xpNeed * 100, 0, 100) + '%';
   $('lvNum').textContent = G.level;
   $('waveNum').textContent = G.wave;
   $('killNum').textContent = fmt(G.kills);
-  $('codexNum').textContent = fmt(codex.size);
+  $('bestNum').textContent = Math.max(bestWave, G.wave);
+  $('shieldNum').textContent = s.shieldMax > 0 ? `🛡 ${G.shield}/${s.shieldMax}` : '';
   if (G.bossAlive) $('bossBar').querySelector('i').style.width = clamp(G.bossAlive.hp / G.bossAlive.maxHp * 100, 0, 100) + '%';
+}
+
+function unitChipText(u) {
+  if (u.kind === 'family') return `${FAMILIES[u.key].name} ${u.level}`;
+  return `${'★'.repeat(Math.min(u.stars, 5))}${u.stars > 5 ? '×' + u.stars : ''} ${u.name} Lv${u.level}`;
+}
+function unitChipColor(u) {
+  return u.kind === 'family' ? CATS[FAMILIES[u.key].cat].color : TIERS[u.tier].color;
 }
 
 function refreshChips() {
   const el = $('powerChips');
+  if (!el) return;
   el.innerHTML = '';
-  for (const inst of G.equipped || []) {
-    const P = PowerPool[inst.id], T = TIERS[P.tier];
+  for (const u of G.units || []) {
     const chip = document.createElement('div');
     chip.className = 'chip';
-    chip.style.borderColor = T.color; chip.style.color = T.color;
-    chip.textContent = `${'★'.repeat(Math.min(inst.stars, 5))}${inst.stars > 5 ? '×' + inst.stars : ''} ${P.name} Lv${inst.level}`;
-    el.appendChild(chip);
-  }
-  if (G.bench && G.bench.length) {
-    const chip = document.createElement('div');
-    chip.className = 'chip';
-    chip.style.borderColor = '#8a93b8'; chip.style.color = '#8a93b8';
-    chip.textContent = `+${G.bench.length} benched — press E to merge`;
+    const col = unitChipColor(u);
+    chip.style.borderColor = col; chip.style.color = col;
+    chip.textContent = unitChipText(u);
     el.appendChild(chip);
   }
 }
 
-// ---- Level-up overlay -------------------------------------------------------
-function drawChoices() {
-  // three uniform draws from the full pool of 10,000 — rarity emerges from
-  // the pool's composition (5000/2500/1250/625/625)
-  const ids = new Set();
-  while (ids.size < 3) ids.add((Math.random() * POOL_TOTAL) | 0);
-  return [...ids];
+function buildRecapHTML() {
+  const s = G.stats;
+  const rows = G.units.map(u => {
+    const sum = unitSummary(u);
+    const col = unitChipColor(u);
+    const tierTag = u.kind === 'fusion' ? ` <small>(${TIERS[u.tier].name} Lv${u.level}${u.stars ? ' ★' + u.stars : ''})</small>` : ` <small>Lv${u.level}</small>`;
+    const name = u.kind === 'family' ? FAMILIES[u.key].name : u.name;
+    return `<div style="color:${col};margin:3px 0"><b>${name}</b>${tierTag}<br>
+      <small style="color:var(--dim)">${sum.effects.join(' · ')}${sum.specials.length ? ' · ' + sum.specials.join(' · ') : ''}</small></div>`;
+  }).join('');
+  const totals = `${s.count} bullets · ${s.rate.toFixed(1)}/s · ${Math.round(s.dmg)} dmg` +
+    (s.pierce ? ` · pierce ${s.pierce}` : '') + (s.bounce ? ` · bounce ${s.bounce}` : '') +
+    (s.homing ? ' · homing' : '') + (s.crit > 0.04 ? ` · crit ${Math.round(s.crit * 100)}%` : '') +
+    (s.lifesteal ? ` · lifesteal ${Math.round(s.lifesteal * 100)}%` : '') +
+    (s.shieldMax ? ` · shield ${s.shieldMax}` : '') + (s.regen ? ` · regen ${s.regen.toFixed(1)}/s` : '');
+  return `<div style="text-align:left;max-width:520px;margin:0 auto">${rows || '<i>nothing yet</i>'}</div>
+    <div style="margin-top:10px;color:var(--ink);font-size:13px">${totals}</div>`;
 }
 
-function openLevelUp() {
-  state = ST.LEVELUP;
-  G.pendingLevels--;
-  SFX.level();
-  const wrap = $('cards');
-  wrap.innerHTML = '';
-  $('oddsLine').textContent = 'Pool odds — Base 50% · Fused 25% · Ascended 12.5% · Transcendent 6.25% · Mythic 6.25%';
-  for (const id of drawChoices()) {
-    const P = PowerPool[id], T = TIERS[P.tier];
-    const card = document.createElement('div');
-    card.className = 'card t' + P.tier;
-    const owned = (G.equipped.find(i => i.id === id) || G.bench.find(i => i.id === id));
-    card.innerHTML = `
-      <span class="tierTag t${P.tier}">${T.jp} ${T.name}${P.tier > 1 ? ' · merged' : ''}</span>
-      <span class="num">No.${id + 1}</span>
-      <h3>${P.name}</h3>
-      <div class="desc">${describePower(P).join('<br>')}</div>
-      ${owned ? `<div class="dupe">Owned — picks as Lv${owned.level + 1}</div>` : ''}`;
-    card.addEventListener('click', () => {
-      grantPower(id);
-      G.hp = Math.min(G.hpMax, G.hp + G.hpMax * 0.2);
-      closeOverlays();
-      if (G.pendingLevels > 0) openLevelUp();
-      else state = ST.PLAY;
-    });
-    wrap.appendChild(card);
-  }
-  $('ovLevel').classList.add('on');
-}
-
-// ---- Merge lab ---------------------------------------------------------------
-let mergeSel = [];
-function openMerge() {
-  state = ST.MERGE;
-  mergeSel = [];
-  renderMergeGrid();
-  $('ovMerge').classList.add('on');
-}
-function renderMergeGrid() {
-  const grid = $('mergeGrid');
-  grid.innerHTML = '';
-  const all = [...G.equipped.map(i => ({ i, eq: true })), ...G.bench.map(i => ({ i, eq: false }))];
-  for (const { i: inst, eq } of all) {
-    const P = PowerPool[inst.id], T = TIERS[P.tier];
-    const el = document.createElement('div');
-    el.className = 'invItem' + (mergeSel.includes(inst) ? ' sel' : '');
-    el.style.borderColor = T.color; el.style.color = T.color;
-    el.innerHTML = `${'★'.repeat(Math.min(inst.stars, 5))} ${P.name}
-      <small>${T.name} · Lv${inst.level}${eq ? ' · equipped' : ' · bench'}</small>`;
-    el.addEventListener('click', () => {
-      if (mergeSel.includes(inst)) mergeSel = mergeSel.filter(x => x !== inst);
-      else { mergeSel.push(inst); if (mergeSel.length > 2) mergeSel.shift(); }
-      renderMergeGrid();
-    });
-    grid.appendChild(el);
-  }
-  // preview
-  const pv = $('mergePreview'), btn = $('btnMerge');
-  if (mergeSel.length === 2) {
-    const [a, b] = mergeSel;
-    const resId = mergeResultId(a.id, b.id);
-    const P = PowerPool[resId], T = TIERS[P.tier];
-    const known = codex.has(resId);
-    const overch = isOvercharge(a.id, b.id);
-    pv.innerHTML = `<span style="color:${TIERS[PowerPool[a.id].tier].color}">${PowerPool[a.id].name}</span>
-      <span class="arrow">+</span>
-      <span style="color:${TIERS[PowerPool[b.id].tier].color}">${PowerPool[b.id].name}</span>
-      <span class="arrow">→</span>
-      <span style="color:${T.color}">${overch ? '★ ' : ''}${known ? P.name : '??? '} <small>(${T.name} No.${resId + 1})</small></span>`;
-    btn.disabled = false;
-  } else {
-    pv.innerHTML = `<span style="color:var(--dim)">Select ${2 - mergeSel.length} more power${mergeSel.length === 1 ? '' : 's'}…</span>`;
-    btn.disabled = true;
-  }
-}
-$('btnMerge').addEventListener('click', () => {
-  if (mergeSel.length !== 2) return;
-  forgeMerge(mergeSel[0], mergeSel[1]);
-  mergeSel = [];
-  renderMergeGrid();
-});
-$('btnMergeClose').addEventListener('click', () => { closeOverlays(); state = ST.PLAY; });
-
-// ---- Death -------------------------------------------------------------------
 function die() {
   state = ST.DEAD;
   bestWave = Math.max(bestWave, G.wave);
-  saveCodex();
-  const tiersOwned = [...G.equipped, ...G.bench].map(i => PowerPool[i.id].tier);
+  if (store) try { store.setItem('myriad.bestWave', String(bestWave)); } catch (e) {}
   $('deadStats').innerHTML = `
-    Survived to <b>Wave ${G.wave}</b> (best: ${Math.max(bestWave, G.wave)}) · <b>${fmt(G.kills)}</b> kills<br>
-    Level <b>${G.level}</b> · <b>${G.forges}</b> powers forged · highest tier
-    <b>${tiersOwned.length ? TIERS[Math.max(...tiersOwned)].name : '—'}</b><br>
-    Damage dealt <b>${fmt(Math.round(G.dmgDealt))}</b> ·
-    Codex <b>${fmt(codex.size)}</b> / 10,000 powers discovered`;
+    <div class="sub">Survived to <b>Wave ${G.wave}</b> (best: ${bestWave}) · <b>${fmt(G.kills)}</b> kills ·
+    Level <b>${G.level}</b> · <b>${G.fusions}</b> auto-fusions · ${fmt(Math.round(G.dmgDealt))} damage dealt</div>
+    ${buildRecapHTML()}`;
   $('ovDead').classList.add('on');
 }
 
-// ---- Overlay helpers -----------------------------------------------------------
 function closeOverlays() {
-  for (const id of ['ovTitle', 'ovLevel', 'ovMerge', 'ovPause', 'ovDead']) $(id).classList.remove('on');
+  for (const id of ['ovTitle', 'ovLevel', 'ovPause', 'ovDead']) $(id).classList.remove('on');
 }
 
-function handleKey(k, e) {
+function handleKey(k) {
   if (state === ST.PLAY) {
-    if (k === 'e' || k === 'tab') openMerge();
-    else if (k === 'p' || k === 'escape') {
+    if (k === 'p' || k === 'escape') {
       state = ST.PAUSE;
-      $('pauseStats').innerHTML = `Wave ${G.wave} · Level ${G.level} · ${fmt(G.kills)} kills ·
-        Codex ${fmt(codex.size)}/10,000<br>Equipped ${G.equipped.length}/6 · Bench ${G.bench.length}`;
+      $('pauseStats').innerHTML = buildRecapHTML();
       $('ovPause').classList.add('on');
-    }
-    else if (k === 'm') SFX.toggle();
-  } else if (state === ST.MERGE && (k === 'e' || k === 'tab' || k === 'escape')) {
-    closeOverlays(); state = ST.PLAY;
+    } else if (k === 'm') SFX.toggle();
   } else if (state === ST.PAUSE && (k === 'p' || k === 'escape')) {
     closeOverlays(); state = ST.PLAY;
   } else if (state === ST.TITLE && k === 'enter') startGame();
@@ -1350,7 +1207,7 @@ $('btnRetry').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', () => { closeOverlays(); state = ST.PLAY; });
 
 // ---------------------------------------------------------------------------
-// Main loop — fixed timestep
+// Main loop
 // ---------------------------------------------------------------------------
 let last = performance.now(), acc = 0;
 const STEP = 1 / 60;
@@ -1369,11 +1226,9 @@ function frame(now) {
   if (state !== ST.TITLE) render();
   else renderTitleBG(ft);
 }
-
-// ambient title background
 const titleStars = Array.from({ length: 90 }, () => ({ x: Math.random(), y: Math.random(), s: rand(0.4, 2), v: rand(6, 40) }));
 function renderTitleBG(dt) {
-  ctx.fillStyle = '#07080f'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#0b0e1a'; ctx.fillRect(0, 0, W, H);
   for (const st of titleStars) {
     st.y += st.v * dt / H;
     if (st.y > 1) { st.y = 0; st.x = Math.random(); }
@@ -1387,13 +1242,13 @@ requestAnimationFrame(frame);
 // Debug / test API
 // ---------------------------------------------------------------------------
 window.__GAME__ = {
-  POOL_STATS, PowerPool, TIERS, mergeResultId, tierOf, isOvercharge,
+  FAMILIES, FAMILY_KEYS, TIERS, SPECIALS, CATS,
   get state() { return state; },
   get G() { return G; },
-  codex,
+  get stats() { return G.stats; },
   start: startGame,
-  grant: (id) => grantPower(id),
-  forceLevelUp: () => { G.pendingLevels++; },
-  forge: (a, b) => forgeMerge(a, b),
-  openMerge, describePower,
+  grantFamily(key) { applyCard({ type: 'new', key }); },
+  levelUnit(i, n) { const u = G.units[i]; for (let k = 0; k < (n || 1); k++) applyCard({ type: 'level', u }); return u; },
+  forceLevelUp() { G.pendingLevels++; },
+  unitSummary, autoFuse, makeFamilyUnit,
 };

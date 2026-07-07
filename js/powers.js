@@ -1,354 +1,248 @@
 'use strict';
 /* ============================================================================
- * POWERS.JS — The 10,000-power system.
+ * POWERS.JS v2 — legible bullet-hell powers + automatic fusion.
  *
- * Pool layout (exactly as specced):
- *   Tier 1  "Base"          5,000   ids     0 .. 4999
- *   Tier 2  "Fused"         2,500   ids  5000 .. 7499   (merged)
- *   Tier 3  "Ascended"      1,250   ids  7500 .. 8749   (merged)
- *   Tier 4  "Transcendent"    625   ids  8750 .. 9374   (merged)
- *   Tier 5  "Mythic"          625   ids  9375 .. 9999   (merged)
- *   ------------------------------------------------------------
- *   Total merged powers: 2500+1250+625+625 = 5,000
- *   Total pool:                              10,000
+ * The build is a set of UNITS (max 6 slots):
+ *   - family unit : one classic upgrade (Lifesteal, Chase, +Bullets…), Lv 1-9
+ *   - fusion unit : created AUTOMATICALLY when two units qualify; keeps both
+ *                   parents' effects, amplifies them, and adds a special.
  *
- * Everything is generated deterministically from a fixed seed, so power
- * #7777 is the same power for every player, and merge recipes are stable:
- * merging the same two powers always yields the same result.
+ * Fusion ladder (all automatic, no menus):
+ *   two families at Lv 3+          →  FUSED        (Tier 2)
+ *   two Fused    at Lv 2+          →  ASCENDED     (Tier 3)
+ *   two Ascended at Lv 2+          →  TRANSCENDENT (Tier 4)
+ *   two Transcendent at Lv 2+      →  MYTHIC       (Tier 5, levels uncapped)
+ *   two Mythics                    →  ★ OVERCHARGE (stacking, uncapped)
+ *
+ * A fused family frees its slot and can be picked up again fresh — so deep
+ * runs keep stacking the same classics into ever-bigger fusions.
  * ==========================================================================*/
 
 // ---------------------------------------------------------------------------
-// Deterministic RNG + integer hashing
+// The 20 families — every one a bullet-hell classic, described in plain words.
+// cat: ATK | DEF | UTIL   adj/noun: used to build readable fusion names.
 // ---------------------------------------------------------------------------
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+const FAMILIES = {
+  bullets:   { name: '+ Bullets',   cat: 'ATK',  adj: 'Manifold', noun: 'Barrage',
+    desc: 'Fire one extra bullet per volley.',            next: '+1 bullet' },
+  chase:     { name: 'Chase',       cat: 'ATK',  adj: 'Seeking',  noun: 'Seekers',
+    desc: 'Your bullets curve toward enemies.',           next: 'stronger homing' },
+  pierce:    { name: 'Pierce',      cat: 'ATK',  adj: 'Piercing', noun: 'Lances',
+    desc: 'Bullets punch through an extra enemy.',        next: '+1 pierce' },
+  bounce:    { name: 'Bounce',      cat: 'ATK',  adj: 'Ricochet', noun: 'Ricochets',
+    desc: 'Bullets bounce off the arena edges.',          next: '+1 bounce' },
+  rapid:     { name: 'Rapid Fire',  cat: 'ATK',  adj: 'Rapid',    noun: 'Salvo',
+    desc: 'Shoot faster.',                                next: '+14% fire rate' },
+  big:       { name: 'Big Shots',   cat: 'ATK',  adj: 'Colossal', noun: 'Cannonade',
+    desc: 'Bigger, harder-hitting bullets.',              next: '+18% size, +12% damage' },
+  split:     { name: 'Split',       cat: 'ATK',  adj: 'Splitting',noun: 'Shards',
+    desc: 'Kills burst into shrapnel.',                   next: '+1 shard on kill' },
+  crit:      { name: 'Critical',    cat: 'ATK',  adj: 'Deadly',   noun: 'Edge',
+    desc: 'Chance to deal 2.5× damage.',                  next: '+7% crit chance' },
+  orbitals:  { name: 'Orbitals',    cat: 'ATK',  adj: 'Orbital',  noun: 'Blades',
+    desc: 'Blades circle you and shred what they touch.', next: '+1 blade' },
+  nova:      { name: 'Nova',        cat: 'ATK',  adj: 'Radiant',  noun: 'Nova',
+    desc: 'Periodic ring of bullets in all directions.',  next: 'bigger, faster nova' },
+  laser:     { name: 'Laser',       cat: 'ATK',  adj: 'Focused',  noun: 'Ray',
+    desc: 'A piercing beam fires at the nearest enemy.',  next: 'faster, stronger beam' },
+  lifesteal: { name: 'Lifesteal',   cat: 'DEF',  adj: 'Vampiric', noun: 'Leech',
+    desc: 'Heal for a share of damage you deal.',         next: '+3% lifesteal' },
+  shield:    { name: 'Shield',      cat: 'DEF',  adj: 'Bulwark',  noun: 'Aegis',
+    desc: 'Charges that each block one hit, then recharge.', next: '+1 shield charge' },
+  vitality:  { name: 'Vitality',    cat: 'DEF',  adj: 'Titan',    noun: 'Heart',
+    desc: 'More max HP (and heals you now).',             next: '+20 max HP' },
+  regen:     { name: 'Regen',       cat: 'DEF',  adj: 'Mending',  noun: 'Bloom',
+    desc: 'Recover HP every second.',                     next: '+0.8 HP/s' },
+  ghost:     { name: 'Ghost',       cat: 'DEF',  adj: 'Phantom',  noun: 'Veil',
+    desc: 'Longer invincibility after taking a hit.',     next: '+0.3s invincibility' },
+  speed:     { name: 'Speed',       cat: 'UTIL', adj: 'Swift',    noun: 'Dash',
+    desc: 'Move faster.',                                 next: '+7% move speed' },
+  magnet:    { name: 'Magnetic',    cat: 'UTIL', adj: 'Magnetic', noun: 'Pull',
+    desc: 'Pull XP gems from farther away.',              next: '+45% pull radius' },
+  slow:      { name: 'Slow Field',  cat: 'UTIL', adj: 'Temporal', noun: 'Field',
+    desc: 'Enemies AND their bullets crawl near you.',    next: 'wider, stronger field' },
+  bomb:      { name: 'Bomb',        cat: 'UTIL', adj: 'Volatile', noun: 'Payload',
+    desc: 'Getting hit detonates a bullet-clearing blast.', next: 'shorter cooldown, bigger blast' },
+};
+const FAMILY_KEYS = Object.keys(FAMILIES);
+const FAMILY_MAX = 9;
 
-// Mix any number of integers into one well-distributed 32-bit hash.
-function hash32() {
-  let h = 0x9E3779B9;
-  for (let i = 0; i < arguments.length; i++) {
-    let k = arguments[i] | 0;
-    k = Math.imul(k, 0xCC9E2D51); k = (k << 15) | (k >>> 17); k = Math.imul(k, 0x1B873593);
-    h ^= k; h = (h << 13) | (h >>> 19); h = (Math.imul(h, 5) + 0xE6546B64) | 0;
-  }
-  h ^= h >>> 16; h = Math.imul(h, 0x85EBCA6B);
-  h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35);
-  h ^= h >>> 16;
-  return h >>> 0;
-}
-
-const WORLD_SEED = 0x5EEDDA;
-
-// ---------------------------------------------------------------------------
-// Element table — 25 elements. Each maps to a concrete on-hit mechanic.
-// mech types implemented by the engine:
-//   dot, slow, chain, vuln, knock, stun, leech, pierce, aoe, crit, echo, pull
-// ---------------------------------------------------------------------------
-const ELEMENTS = [
-  { key: 'fire',      root: 'Pyro',    adj: 'Infernal',   color: '#ff5a2a', mech: 'dot',    p: 0.45 },
-  { key: 'ice',       root: 'Cryo',    adj: 'Glacial',    color: '#6fd8ff', mech: 'slow',   p: 0.40 },
-  { key: 'lightning', root: 'Volt',    adj: 'Voltaic',    color: '#ffe94a', mech: 'chain',  p: 0.60 },
-  { key: 'water',     root: 'Hydro',   adj: 'Tidal',      color: '#3a86ff', mech: 'vuln',   p: 0.18 },
-  { key: 'wind',      root: 'Aero',    adj: 'Galeforce',  color: '#b8ffd8', mech: 'knock',  p: 140  },
-  { key: 'earth',     root: 'Terra',   adj: 'Seismic',    color: '#c89a5a', mech: 'stun',   p: 0.14 },
-  { key: 'nature',    root: 'Flora',   adj: 'Verdant',    color: '#58d84a', mech: 'leech',  p: 0.03 },
-  { key: 'poison',    root: 'Toxi',    adj: 'Venomous',   color: '#9bd820', mech: 'dot',    p: 0.70 },
-  { key: 'shadow',    root: 'Umbra',   adj: 'Umbral',     color: '#7a5cd8', mech: 'vuln',   p: 0.22 },
-  { key: 'holy',      root: 'Lumen',   adj: 'Radiant',    color: '#ffe9a8', mech: 'crit',   p: 0.12 },
-  { key: 'arcane',    root: 'Arca',    adj: 'Arcane',     color: '#d05cff', mech: 'echo',   p: 0.25 },
-  { key: 'void',      root: 'Nihil',   adj: 'Voidtouched',color: '#5c6bd8', mech: 'pull',   p: 90   },
-  { key: 'blood',     root: 'Hemo',    adj: 'Sanguine',   color: '#ff2a5a', mech: 'leech',  p: 0.05 },
-  { key: 'steel',     root: 'Ferro',   adj: 'Steelbound', color: '#b8c8d8', mech: 'pierce', p: 1    },
-  { key: 'crystal',   root: 'Crysta',  adj: 'Prismatic',  color: '#7affd8', mech: 'aoe',    p: 42   },
-  { key: 'sound',     root: 'Sono',    adj: 'Resonant',   color: '#ff8ad8', mech: 'aoe',    p: 36   },
-  { key: 'gravity',   root: 'Gravi',   adj: 'Graviton',   color: '#a88aff', mech: 'pull',   p: 120  },
-  { key: 'time',      root: 'Chrono',  adj: 'Chronal',    color: '#8affff', mech: 'slow',   p: 0.50 },
-  { key: 'lunar',     root: 'Luna',    adj: 'Lunar',      color: '#c8d8ff', mech: 'crit',   p: 0.15 },
-  { key: 'solar',     root: 'Sol',     adj: 'Solar',      color: '#ffb42a', mech: 'dot',    p: 0.60 },
-  { key: 'storm',     root: 'Tempes',  adj: 'Stormcaller',color: '#4ad8ff', mech: 'chain',  p: 0.45 },
-  { key: 'spirit',    root: 'Anima',   adj: 'Spiritwoven',color: '#baffc8', mech: 'pierce', p: 1    },
-  { key: 'dream',     root: 'Oneiro',  adj: 'Dreamveiled',color: '#ffc8f0', mech: 'slow',   p: 0.35 },
-  { key: 'chaos',     root: 'Chao',    adj: 'Chaotic',    color: '#ff6bff', mech: 'crit',   p: 0.20 },
-  { key: 'cosmic',    root: 'Astra',   adj: 'Astral',     color: '#f0f0ff', mech: 'echo',   p: 0.30 },
-];
+const CATS = {
+  ATK:  { label: 'Attack',  color: '#6fd8ff' },
+  DEF:  { label: 'Defense', color: '#54d68a' },
+  UTIL: { label: 'Utility', color: '#c8a0ff' },
+};
 
 // ---------------------------------------------------------------------------
-// Pattern table — 20 emitter behaviors implemented by the engine.
-// base: relative stat baseline for that pattern.
-// ---------------------------------------------------------------------------
-const PATTERNS = [
-  { key: 'fan',       noun: 'Fan',       base: { dmg: 9,  rate: 1.10, count: 3, speed: 340, size: 5,  life: 1.5 } },
-  { key: 'ring',      noun: 'Ring',      base: { dmg: 7,  rate: 0.55, count: 10,speed: 260, size: 5,  life: 1.7 } },
-  { key: 'spiral',    noun: 'Spiral',    base: { dmg: 8,  rate: 5.00, count: 1, speed: 300, size: 5,  life: 1.6 } },
-  { key: 'wave',      noun: 'Wave',      base: { dmg: 10, rate: 1.30, count: 2, speed: 300, size: 6,  life: 1.6 } },
-  { key: 'seeker',    noun: 'Seeker',    base: { dmg: 11, rate: 0.95, count: 1, speed: 260, size: 6,  life: 2.6 } },
-  { key: 'orbitals',  noun: 'Orbit',     base: { dmg: 12, rate: 0.40, count: 2, speed: 3.0, size: 8,  life: 6.0 } },
-  { key: 'nova',      noun: 'Nova',      base: { dmg: 13, rate: 0.45, count: 1, speed: 220, size: 10, life: 0.9 } },
-  { key: 'lance',     noun: 'Lance',     base: { dmg: 26, rate: 0.60, count: 1, speed: 430, size: 9,  life: 1.4 } },
-  { key: 'scatter',   noun: 'Scatter',   base: { dmg: 6,  rate: 1.00, count: 6, speed: 390, size: 4,  life: 0.5 } },
-  { key: 'flak',      noun: 'Flak',      base: { dmg: 9,  rate: 0.85, count: 1, speed: 300, size: 7,  life: 0.8 } },
-  { key: 'boomerang', noun: 'Boomerang', base: { dmg: 14, rate: 0.75, count: 1, speed: 380, size: 8,  life: 2.2 } },
-  { key: 'cross',     noun: 'Cross',     base: { dmg: 9,  rate: 0.90, count: 4, speed: 320, size: 5,  life: 1.5 } },
-  { key: 'starburst', noun: 'Starburst', base: { dmg: 8,  rate: 0.80, count: 5, speed: 300, size: 5,  life: 1.6 } },
-  { key: 'wall',      noun: 'Wall',      base: { dmg: 8,  rate: 0.80, count: 5, speed: 280, size: 5,  life: 1.4 } },
-  { key: 'meteor',    noun: 'Meteor',    base: { dmg: 24, rate: 0.55, count: 1, speed: 0,   size: 46, life: 0.7 } },
-  { key: 'serpent',   noun: 'Serpent',   base: { dmg: 11, rate: 1.10, count: 1, speed: 300, size: 7,  life: 2.0 } },
-  { key: 'burst',     noun: 'Burst',     base: { dmg: 8,  rate: 1.40, count: 3, speed: 360, size: 5,  life: 1.3 } },
-  { key: 'mine',      noun: 'Mine',      base: { dmg: 22, rate: 0.55, count: 1, speed: 0,   size: 8,  life: 8.0 } },
-  { key: 'beam',      noun: 'Beam',      base: { dmg: 15, rate: 1.00, count: 1, speed: 0,   size: 7,  life: 0.14} },
-  { key: 'echoshot',  noun: 'Echo',      base: { dmg: 12, rate: 1.10, count: 1, speed: 360, size: 6,  life: 1.6 } },
-];
-
-// ---------------------------------------------------------------------------
-// Variant table — 10 stat mutators. 25 * 20 * 10 = 5,000 base powers.
-// ---------------------------------------------------------------------------
-const VARIANTS = [
-  { key: 'swift',     prefix: 'Swift',     mods: { speed: 1.40, rate: 1.15, dmg: 0.85 } },
-  { key: 'heavy',     prefix: 'Heavy',     mods: { dmg: 1.50, size: 1.25, rate: 0.75 } },
-  { key: 'twin',      prefix: 'Twin',      mods: { count: 1, dmg: 0.80 } },              // count is additive
-  { key: 'rapid',     prefix: 'Rapid',     mods: { rate: 1.45, dmg: 0.75 } },
-  { key: 'giant',     prefix: 'Giant',     mods: { size: 1.60, dmg: 1.25, speed: 0.80 } },
-  { key: 'keen',      prefix: 'Keen',      mods: { crit: 0.15 } },
-  { key: 'splitting', prefix: 'Splitting', mods: { split: true } },                      // shards on kill
-  { key: 'piercing',  prefix: 'Piercing',  mods: { pierce: 1 } },
-  { key: 'volatile',  prefix: 'Volatile',  mods: { volatile: true } },                   // blast on expiry
-  { key: 'prime',     prefix: 'Prime',     mods: { dmg: 1.08, rate: 1.08, speed: 1.08 } },
-];
-
-// ---------------------------------------------------------------------------
-// Tier table
+// Fusion tiers
 // ---------------------------------------------------------------------------
 const TIERS = [
   null,
-  { tier: 1, name: 'Base',         count: 5000, start: 0,    mult: 1.00, emitters: 1, color: '#9fb4c8', jp: '基' },
-  { tier: 2, name: 'Fused',        count: 2500, start: 5000, mult: 1.70, emitters: 2, color: '#54d68a', jp: '融' },
-  { tier: 3, name: 'Ascended',     count: 1250, start: 7500, mult: 2.90, emitters: 3, color: '#4aa8ff', jp: '昇' },
-  { tier: 4, name: 'Transcendent', count: 625,  start: 8750, mult: 5.00, emitters: 4, color: '#c063ff', jp: '超' },
-  { tier: 5, name: 'Mythic',       count: 625,  start: 9375, mult: 8.50, emitters: 5, color: '#ffb454', jp: '神' },
+  { tier: 1, name: 'Base',         color: '#9fb4c8', jp: '基', baseMult: 1.00, perLevel: 0,    maxLevel: FAMILY_MAX },
+  { tier: 2, name: 'Fused',        color: '#54d68a', jp: '融', baseMult: 1.15, perLevel: 0.10, maxLevel: 9 },
+  { tier: 3, name: 'Ascended',     color: '#4aa8ff', jp: '昇', baseMult: 1.35, perLevel: 0.10, maxLevel: 9 },
+  { tier: 4, name: 'Transcendent', color: '#c063ff', jp: '超', baseMult: 1.60, perLevel: 0.12, maxLevel: 9 },
+  { tier: 5, name: 'Mythic',       color: '#ffb454', jp: '神', baseMult: 2.00, perLevel: 0.15, maxLevel: 999 },
 ];
-const POOL_TOTAL = 10000;
 
-function tierOf(id) {
-  if (id < 5000) return 1;
-  if (id < 7500) return 2;
-  if (id < 8750) return 3;
-  if (id < 9375) return 4;
-  return 5;
+// How ready a unit must be to auto-fuse.
+const FUSE_READY_FAMILY_LEVEL = 3; // two Lv3+ families → Fused
+const FUSE_READY_FUSION_LEVEL = 2; // two Lv2+ same-tier fusions → next tier
+
+// ---------------------------------------------------------------------------
+// Fusion specials — plain-language bonuses, deterministic per fusion name.
+// game.js interprets `key`.
+// ---------------------------------------------------------------------------
+const SPECIALS = {
+  2: [
+    { key: 'dmg15',    label: '+15% damage' },
+    { key: 'rate12',   label: '+12% fire rate' },
+    { key: 'pierce1',  label: '+1 pierce' },
+    { key: 'sparks',   label: 'kills spark a small blast' },
+    { key: 'crit10',   label: '+10% crit chance' },
+    { key: 'bullet1',  label: '+1 bullet' },
+    { key: 'graze',    label: 'enemy bullets fly 10% slower' },
+    { key: 'gemheal',  label: 'gems heal 1 HP' },
+  ],
+  3: [
+    { key: 'echo',     label: 'every 6s: your volley echoes for free' },
+    { key: 'dmg25',    label: '+25% damage' },
+    { key: 'bullet2',  label: '+2 bullets' },
+    { key: 'kilnova',  label: 'kills have 10% chance to burst into a nova' },
+    { key: 'steel',    label: '+1 pierce and +1 bounce' },
+  ],
+  4: [
+    { key: 'ripple',   label: 'every 12s: a time-ripple slows all enemy bullets' },
+    { key: 'dmg40',    label: '+40% damage' },
+    { key: 'guardian', label: 'shield breaks detonate a huge nova' },
+    { key: 'drain',    label: '+5% lifesteal on everything' },
+  ],
+  5: [
+    { key: 'phoenix',  label: 'PHOENIX — cheat death once per run' },
+    { key: 'barrage',  label: 'APOCALYPSE — every 18s, bombs rain across the arena' },
+    { key: 'infinity', label: 'INFINITY — ALL your effects +20%' },
+  ],
+};
+
+const MYTH_BEINGS = ['OUROBOROS', 'LEVIATHAN', 'FENRIR', 'PHOENIX', 'BAHAMUT', 'AMATERASU',
+  'SUSANOO', 'TIAMAT', 'CERBERUS', 'JORMUNGANDR', 'GILGAMESH', 'NYX'];
+
+// ---------------------------------------------------------------------------
+// Deterministic string hash (for picking specials / myth names)
+// ---------------------------------------------------------------------------
+function strHash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
 }
 
 // ---------------------------------------------------------------------------
-// Name banks for higher tiers
+// Units
 // ---------------------------------------------------------------------------
-const T3_EPITHETS = ['Ascendant', 'Exalted', 'Sovereign', 'Zenith', 'Apex', 'Celestial',
-  'Eternal', 'Fabled', 'Halcyon', 'Paragon', 'Luminous', 'Tempered'];
-const T4_TITLES = ['Annihilator', 'Worldshaper', 'Godpiercer', 'Skysunderer', 'Fatespinner',
-  'Stormcrown', 'Duskbringer', 'Dawnforger', 'Voidwalker', 'Starbinder'];
-const T4_DOMAINS = ['the Endless Sky', 'the Shattered Moon', 'the First Flame', 'the Silent Deep',
-  'a Thousand Blades', 'the Final Hour', 'the Broken Crown', 'the Astral Sea',
-  'Forgotten Kings', 'the Ninth Heaven'];
-const MYTH_BEINGS = ['Ouroboros', 'Leviathan', 'Behemoth', 'Ziz', 'Fenrir', 'Jormungandr',
-  'Valkyrie', 'Seraphim', 'Ifrit', 'Marid', 'Djinn', 'Basilisk', 'Wyvern', 'Hydra',
-  'Chimera', 'Cerberus', 'Phoenix', 'Roc', 'Kraken', 'Banshee', 'Kitsune', 'Tengu',
-  'Oni', 'Raiju', 'Orochi', 'Shinigami', 'Amaterasu', 'Susanoo', 'Tsukuyomi', 'Izanami',
-  'Tiamat', 'Marduk', 'Anubis', 'Osiris', 'Ra', 'Sekhmet', 'Quetzalcoatl', 'Tezcatlipoca',
-  'Baba Yaga', 'Koschei', 'Morrigan', 'Cernunnos', 'Typhon', 'Nyx', 'Erebus', 'Helios',
-  'Selene', 'Prometheus', 'Gilgamesh', 'Humbaba'];
-const MYTH_TITLES = ['Devourer of Ends', 'Herald of Dawn', 'Warden of the Void',
-  'Sovereign of Storms', 'the Flame Eternal', 'Tidebreaker', 'Star-Eater', 'Dreamweaver',
-  'Worldrender', 'Lightbringer', 'Night Sovereign', 'the Unbound', 'the Infinite'];
+function makeFamilyUnit(key) {
+  return { kind: 'family', key, tier: 1, level: 1, stars: 0 };
+}
 
-// ---------------------------------------------------------------------------
-// Keystones (Tier 4+) — one global passive per power. Engine reads .keystone.
-// ---------------------------------------------------------------------------
-const KEYSTONES = [
-  { key: 'pierce_all',  label: '+1 pierce on all bullets' },
-  { key: 'dmg_all',     label: '+20% damage on everything' },
-  { key: 'rate_all',    label: '+15% fire rate on everything' },
-  { key: 'move',        label: '+12% movement speed' },
-  { key: 'kill_nova',   label: 'kills have 10% chance to detonate a nova' },
-  { key: 'xp_gain',     label: '+25% XP gained' },
-  { key: 'bullet_speed',label: '+20% bullet speed' },
-  { key: 'crit_all',    label: '+10% crit chance on everything' },
-  { key: 'magnet',      label: 'double gem pickup radius' },
-  { key: 'count_all',   label: '+1 projectile on every volley' },
-];
+// First family key in a unit's tree — donates the adjective/noun for names.
+function leadFamily(unit) {
+  return unit.kind === 'family' ? unit.key : leadFamily(unit.members[0]);
+}
 
-// ---------------------------------------------------------------------------
-// Auras (Tier 5 only) — persistent field around the player.
-// ---------------------------------------------------------------------------
-const AURAS = [
-  { key: 'blades',  label: 'Blade Halo — orbiting blades shred nearby foes' },
-  { key: 'halo',    label: 'Burning Halo — a ring of light sears everything close' },
-  { key: 'storm',   label: 'Stormheart — lightning arcs to random nearby foes' },
-  { key: 'frost',   label: 'Frostfield — enemies near you are chilled' },
-  { key: 'gravity', label: 'Event Horizon — drags enemies toward their doom' },
-  { key: 'phoenix', label: 'Phoenix Soul — cheat death once per run' },
-];
+function fusionName(a, b, tier) {
+  const adj = FAMILIES[leadFamily(a)].adj, noun = FAMILIES[leadFamily(b)].noun;
+  const core = `${adj} ${noun}`;
+  if (tier === 3) return `Ascended ${core}`;
+  if (tier === 4) return `Transcendent ${core}`;
+  if (tier === 5) return `${MYTH_BEINGS[strHash(core) % MYTH_BEINGS.length]} — ${core}`;
+  return core;
+}
 
-// ---------------------------------------------------------------------------
-// Power construction
-// ---------------------------------------------------------------------------
-// An emitter is one firing behavior:
-//   { pat, el, dmg, rate, count, speed, size, life, pierce, crit, split, volatile }
-function makeBaseEmitter(elIdx, patIdx, varIdx) {
-  const P = PATTERNS[patIdx].base;
-  const V = VARIANTS[varIdx].mods;
+function makeFusion(a, b) {
+  const tier = Math.min(5, Math.max(a.tier, b.tier) + 1);
+  const name = fusionName(a, b, tier);
+  const pool = SPECIALS[tier];
   return {
-    pat: patIdx,
-    el: elIdx,
-    dmg:   P.dmg   * (V.dmg   || 1),
-    rate:  P.rate  * (V.rate  || 1),
-    count: P.count + (V.count || 0),
-    speed: P.speed * (V.speed || 1),
-    size:  P.size  * (V.size  || 1),
-    life:  P.life,
-    pierce: (V.pierce || 0),
-    crit:   (V.crit   || 0),
-    split:    !!V.split,
-    volatile: !!V.volatile,
+    kind: 'fusion', tier, name, level: 1, stars: 0,
+    special: pool[strHash(name) % pool.length],
+    members: [a, b],
   };
 }
 
-function cloneEmitter(e) {
-  return { pat: e.pat, el: e.el, dmg: e.dmg, rate: e.rate, count: e.count,
-    speed: e.speed, size: e.size, life: e.life, pierce: e.pierce, crit: e.crit,
-    split: e.split, volatile: e.volatile };
+// ★ Overcharge: Mythic + Mythic → one Mythic, stars +1, members pooled.
+function overcharge(a, b) {
+  const keep = a.stars >= b.stars ? a : b, eat = keep === a ? b : a;
+  keep.stars += 1;
+  keep.level = Math.max(keep.level, eat.level);
+  keep.members = keep.members.concat(eat.members);
+  return keep;
 }
 
-// Deterministically pick n items from arr (seeded), preferring unique patterns.
-function pickEmitters(arr, n, rng) {
-  const pool = arr.slice();
-  // shuffle (Fisher–Yates, seeded)
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
-  }
-  // prefer distinct patterns first
-  const out = [], seen = new Set();
-  for (const e of pool) { if (!seen.has(e.pat)) { out.push(e); seen.add(e.pat); if (out.length === n) return out; } }
-  for (const e of pool) { if (out.length >= n) break; if (!out.includes(e)) out.push(e); }
-  while (out.length < n && pool.length) out.push(pool[out.length % pool.length]);
-  return out.slice(0, n);
+// ---------------------------------------------------------------------------
+// Walking a build — every family in the tree contributes its frozen level,
+// amplified by every fusion above it (and ★s), so fusing is always a buff.
+// ---------------------------------------------------------------------------
+function unitAmp(unit) {
+  const T = TIERS[unit.tier];
+  let amp = T.baseMult + T.perLevel * (unit.level - 1);
+  amp *= Math.pow(1.5, unit.stars || 0);
+  return amp;
 }
 
-const PowerPool = (() => {
-  const powers = new Array(POOL_TOTAL);
+// Calls cb(familyKey, effectiveLevel) for each family in the unit's tree.
+function walkUnit(unit, cb, amp) {
+  amp = (amp || 1) * unitAmp(unit);
+  if (unit.kind === 'family') { cb(unit.key, unit.level * amp); return; }
+  for (const m of unit.members) walkUnit(m, cb, amp);
+}
 
-  // ---- Tier 1: 5,000 base powers -------------------------------------------
-  // id = el*200 + pat*10 + variant   (25 * 20 * 10 = 5,000)
-  for (let id = 0; id < 5000; id++) {
-    const el = Math.floor(id / 200);
-    const pat = Math.floor((id % 200) / 10);
-    const v = id % 10;
-    powers[id] = {
-      id, tier: 1,
-      name: `${VARIANTS[v].prefix} ${ELEMENTS[el].adj} ${PATTERNS[pat].noun}`,
-      elements: [el],
-      emitters: [makeBaseEmitter(el, pat, v)],
-      keystone: null, aura: null,
-      parents: null,
-    };
-  }
+// Calls cb(special, fusionLevel) for each fusion special in the tree.
+function walkSpecials(unit, cb) {
+  if (unit.kind !== 'fusion') return;
+  cb(unit.special, unit.level);
+  for (const m of unit.members) walkSpecials(m, cb);
+}
 
-  // ---- Merged tiers: parents drawn from the tier below ----------------------
-  function buildMergedTier(tierIdx, nameFn) {
-    const T = TIERS[tierIdx], below = TIERS[tierIdx - 1];
-    for (let i = 0; i < T.count; i++) {
-      const id = T.start + i;
-      const rng = mulberry32(hash32(WORLD_SEED, id, tierIdx));
-      // two distinct parents from the tier below
-      const pa = below.start + Math.floor(rng() * below.count);
-      let pb = below.start + Math.floor(rng() * below.count);
-      if (pb === pa) pb = below.start + ((pb + 1 - below.start) % below.count);
-      const A = powers[pa], B = powers[pb];
+// Plain-language summary lines for a unit (cards, pause screen, death screen).
+function unitSummary(unit) {
+  const fams = new Map();
+  walkUnit(unit, (key, lv) => fams.set(key, (fams.get(key) || 0) + lv));
+  const lines = [...fams.entries()].map(([key, lv]) =>
+    `${FAMILIES[key].name} ${lv >= 10 ? String(Math.round(lv)) : lv.toFixed(1).replace(/\.0$/, '')}`);
+  const specials = [];
+  walkSpecials(unit, (sp) => specials.push(sp.label));
+  return { effects: lines, specials };
+}
 
-      // gather ancestor emitters, pick this tier's emitter loadout
-      const genePool = A.emitters.concat(B.emitters).map(cloneEmitter);
-      const emitters = pickEmitters(genePool, T.emitters, rng).map(cloneEmitter);
-      // scale to tier: total output grows with mult but is split across emitters
-      const perEmitter = T.mult / Math.sqrt(emitters.length);
-      for (const e of emitters) {
-        e.dmg *= perEmitter;
-        e.rate *= 0.90 + rng() * 0.25;
-        e.size *= 1 + (tierIdx - 1) * 0.06;
-        if (rng() < 0.25 * (tierIdx - 1)) e.pierce += 1;
-      }
-
-      const elements = [...new Set(emitters.map(e => e.el))];
-      powers[id] = {
-        id, tier: tierIdx,
-        name: nameFn(i, A, B, emitters, rng),
-        elements,
-        emitters,
-        keystone: tierIdx >= 4 ? KEYSTONES[hash32(WORLD_SEED, id, 77) % KEYSTONES.length] : null,
-        aura: tierIdx === 5 ? AURAS[hash32(WORLD_SEED, id, 88) % AURAS.length] : null,
-        parents: [pa, pb],
-      };
+// ---------------------------------------------------------------------------
+// Automatic fusion check — returns a description of what fused (or null).
+// Mutates `units` in place. Call after every acquisition/level-up.
+// ---------------------------------------------------------------------------
+function autoFuse(units) {
+  // lowest tier fuses first so ladders build bottom-up
+  for (let tier = 1; tier <= 5; tier++) {
+    const ready = units.filter(u =>
+      u.tier === tier &&
+      (tier === 1 ? (u.kind === 'family' && u.level >= FUSE_READY_FAMILY_LEVEL)
+       : tier === 5 ? (u.kind === 'fusion')                                   // two Mythics overcharge on sight
+                    : (u.kind === 'fusion' && u.level >= FUSE_READY_FUSION_LEVEL)));
+    if (ready.length < 2) continue;
+    const [a, b] = ready;                    // acquisition order — oldest first
+    const ia = units.indexOf(a), ib = units.indexOf(b);
+    if (tier === 5) {
+      const merged = overcharge(a, b);
+      units.splice(Math.max(ia, ib), 1);
+      return { kind: 'overcharge', unit: merged,
+        title: `★ OVERCHARGE — ${merged.name}`,
+        subtitle: `now ★${merged.stars} — everything ×1.5, forever stackable` };
     }
+    const fusion = makeFusion(a, b);
+    units.splice(Math.max(ia, ib), 1);
+    units.splice(Math.min(ia, ib), 1, fusion);
+    const nameA = a.kind === 'family' ? FAMILIES[a.key].name : a.name;
+    const nameB = b.kind === 'family' ? FAMILIES[b.key].name : b.name;
+    return { kind: 'fusion', unit: fusion,
+      title: `⚡ AUTO-FUSION — ${fusion.name}`,
+      subtitle: `${nameA} + ${nameB} merged · bonus: ${fusion.special.label}` };
   }
-
-  const rootOf = (p) => ELEMENTS[p.elements[0]].root;
-  const T2_SUFFIX = ['Fusion', 'Convergence', 'Amalgam', 'Union', 'Synthesis', 'Communion', 'Paradox', 'Accord'];
-
-  buildMergedTier(2, (i, A, B, emitters) =>
-    `${rootOf(A)}${rootOf(B).toLowerCase()} ${T2_SUFFIX[i % T2_SUFFIX.length]}`);
-
-  buildMergedTier(3, (i, A, B, emitters) =>
-    `${T3_EPITHETS[i % T3_EPITHETS.length]} ${rootOf(A)}${rootOf(B).toLowerCase()} ${PATTERNS[emitters[0].pat].noun}`);
-
-  buildMergedTier(4, (i) =>
-    `${T4_TITLES[i % T4_TITLES.length]} of ${T4_DOMAINS[Math.floor(i / T4_TITLES.length) % T4_DOMAINS.length]}`);
-
-  buildMergedTier(5, (i) =>
-    `${MYTH_BEINGS[i % MYTH_BEINGS.length]}, ${MYTH_TITLES[Math.floor(i / MYTH_BEINGS.length) % MYTH_TITLES.length]}`);
-
-  return powers;
-})();
-
-// ---------------------------------------------------------------------------
-// Merge rules
-// ---------------------------------------------------------------------------
-// Merging two powers yields a deterministic power one tier above the higher
-// input tier (recipes are stable & discoverable). Two Mythics overcharge:
-// same recipe hash picks a Mythic and the result gains a ★ (stacking,
-// uncapped ×1.5 damage each — the infinite-power endgame).
-function mergeResultId(idA, idB) {
-  const a = Math.min(idA, idB), b = Math.max(idA, idB);
-  const t = Math.min(5, Math.max(tierOf(a), tierOf(b)) + 1);
-  const T = TIERS[t];
-  return T.start + (hash32(WORLD_SEED, a, b, t) % T.count);
-}
-
-function isOvercharge(idA, idB) {
-  return tierOf(idA) === 5 && tierOf(idB) === 5;
-}
-
-// ---------------------------------------------------------------------------
-// Pool stats (exposed for UI + tests)
-// ---------------------------------------------------------------------------
-const POOL_STATS = (() => {
-  const byTier = [0, 0, 0, 0, 0, 0];
-  for (const p of PowerPool) byTier[p.tier]++;
-  return {
-    total: PowerPool.length,
-    byTier: byTier.slice(1),                    // [5000, 2500, 1250, 625, 625]
-    merged: byTier[2] + byTier[3] + byTier[4] + byTier[5],
-  };
-})();
-
-// Human description of what a power does (for cards / codex).
-function describePower(p) {
-  const bits = p.emitters.map(e =>
-    `${PATTERNS[e.pat].noun.toLowerCase()} ×${Math.max(1, Math.round(e.count))} · ${ELEMENTS[e.el].key} (${ELEMENTS[e.el].mech})`);
-  const lines = [bits.join('  |  ')];
-  if (p.keystone) lines.push(`Keystone: ${p.keystone.label}`);
-  if (p.aura) lines.push(`Aura: ${p.aura.label}`);
-  return lines;
+  return null;
 }
