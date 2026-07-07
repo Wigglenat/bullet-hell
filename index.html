@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>MYRIAD BREAK — auto-fusing bullet hell</title>
 <style>
   :root {
@@ -13,9 +13,12 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; background: var(--bg); overflow: hidden;
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; color: var(--ink);
-    user-select: none; -webkit-user-select: none; }
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    touch-action: none; overscroll-behavior: none; }
   #wrap { position: fixed; inset: 0; }
-  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    touch-action: none; }
+  .panel { touch-action: pan-y; } /* overlays stay scrollable on phones */
 
   /* ---------- HUD ---------- */
   #hud { position: absolute; inset: 0; pointer-events: none; display: none; }
@@ -106,6 +109,29 @@
 
   #deadStats { font-size: 14px; line-height: 1.8; margin: 14px 0; color: var(--dim); }
   #deadStats b { color: var(--ink); }
+
+  /* ---------- Mobile / touch ---------- */
+  #btnPause { position: absolute; display: none; align-items: center; justify-content: center;
+    top: calc(38px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
+    width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid var(--line);
+    background: rgba(10, 14, 28, .7); color: var(--ink); font-size: 18px;
+    pointer-events: auto; z-index: 5; }
+  body.touch #btnPause { display: flex; }
+  .hudTop { padding-top: env(safe-area-inset-top); padding-left: env(safe-area-inset-left); }
+  #powerChips { padding-bottom: env(safe-area-inset-bottom); }
+  @media (max-width: 700px) {
+    .hudTop { gap: 8px; font-size: 11px; }
+    #hpBar { width: 100px; }
+    .hideMobile { display: none; }
+    #hintBar { display: none; }
+    #powerChips { max-width: 92vw; }
+    .chip { font-size: 10px; padding: 2px 7px; }
+    #fusionBanner .fTitle { font-size: 20px; }
+    #fusionBanner .fSub { font-size: 12px; }
+    h1 { font-size: 30px; letter-spacing: 5px; }
+    .panel { padding: 18px 14px; }
+    .card { width: min(320px, 86vw); }
+  }
 </style>
 </head>
 <body>
@@ -119,9 +145,10 @@
       <div class="stat">Lv <b id="lvNum">1</b></div>
       <div class="bar" id="xpBar"><i></i></div>
       <div class="stat">Wave <b id="waveNum">1</b></div>
-      <div class="stat">Kills <b id="killNum">0</b></div>
-      <div class="stat">Best <b id="bestNum">0</b></div>
+      <div class="stat hideMobile">Kills <b id="killNum">0</b></div>
+      <div class="stat hideMobile">Best <b id="bestNum">0</b></div>
     </div>
+    <div id="btnPause">⏸</div>
     <div id="bossBar"><div id="bossName"></div><div class="bar"><i></i></div></div>
     <div id="fusionBanner"><div class="fTitle"></div><div class="fSub"></div></div>
     <div id="powerChips"></div>

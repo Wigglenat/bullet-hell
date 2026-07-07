@@ -58,12 +58,19 @@ pause screen (`P`) lists every effect in plain numbers.
 
 ## Controls
 
+**Desktop**
+
 | Key | Action |
 |---|---|
 | `WASD` / arrows | move |
 | `Shift` | focus — slow, precise movement (your red hitbox dot is always visible) |
 | `P` / `Esc` | pause + full build breakdown |
 | `M` | mute |
+
+**Mobile / touch** — drag anywhere on the battlefield to steer with a floating
+analog joystick: a full drag is full speed, a **light drag moves you slowly**
+(that's your focus mode, and it shows the hitbox). Tap **⏸** (top-right) for
+pause + build info. Level-up cards and menus are tappable.
 
 Readability rules: enemy bullets are magenta/white and always drawn on top;
 your bullets are quiet cyan; bosses (every 10th wave) get a name and an HP bar.

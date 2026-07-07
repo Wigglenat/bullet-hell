@@ -122,6 +122,35 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
 // ---------------------------------------------------------------------------
+// Touch input — floating analog joystick: drag anywhere on the battlefield.
+// Full drag = full speed; a light drag moves slowly (mobile "focus" mode).
+// ---------------------------------------------------------------------------
+const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+const joy = { active: false, id: -1, sx: 0, sy: 0, x: 0, y: 0, R: 64 };
+if (IS_TOUCH) document.body.classList.add('touch');
+
+cv.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (joy.active) return;              // one steering finger; extra fingers ignored
+  const t = e.changedTouches[0];
+  joy.active = true; joy.id = t.identifier;
+  joy.sx = joy.x = t.clientX; joy.sy = joy.y = t.clientY;
+}, { passive: false });
+cv.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === joy.id) { joy.x = t.clientX; joy.y = t.clientY; }
+  }
+}, { passive: false });
+function joyEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joy.id) { joy.active = false; joy.id = -1; }
+  }
+}
+cv.addEventListener('touchend', joyEnd);
+cv.addEventListener('touchcancel', joyEnd);
+
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 const ST = { TITLE: 0, PLAY: 1, LEVELUP: 2, PAUSE: 3, DEAD: 4 };
@@ -836,16 +865,27 @@ function update(dt) {
   G.rampMult = s.ramp > 0 && G.rampStart !== null ? 1 + s.ramp * Math.max(0, G.time - G.rampStart) : 1;
   if (G.rebirthT > 0) G.rebirthT -= dt;
 
-  // movement
+  // movement — keyboard, or the touch joystick when no keys are held
   const up = keys.has('w') || keys.has('arrowup'), dn = keys.has('s') || keys.has('arrowdown');
   const lf = keys.has('a') || keys.has('arrowleft'), rt = keys.has('d') || keys.has('arrowright');
   G.focus = keys.has('shift');
   let mx = (rt ? 1 : 0) - (lf ? 1 : 0), my = (dn ? 1 : 0) - (up ? 1 : 0);
+  let speedK = G.focus ? 0.45 : 1;
+  if (!mx && !my && joy.active) {
+    const jdx = joy.x - joy.sx, jdy = joy.y - joy.sy;
+    const jd = Math.hypot(jdx, jdy);
+    const mag = Math.min(1, jd / joy.R);
+    if (mag > 0.12) {
+      mx = jdx / jd; my = jdy / jd;
+      speedK = 0.2 + 0.8 * ((mag - 0.12) / 0.88); // analog: light drag = slow, precise
+      G.focus = mag < 0.5;                        // creeping shows the hitbox
+    }
+  }
   if (mx || my) {
     const m = Math.hypot(mx, my);
     mx /= m; my /= m;
     G.faceX = mx; G.faceY = my;
-    const spd = s.moveSpd * (G.focus ? 0.45 : 1);
+    const spd = s.moveSpd * speedK;
     G.px = clamp(G.px + mx * spd * dt, 14, W - 14);
     G.py = clamp(G.py + my * spd * dt, 14, H - 14);
   }
@@ -1202,6 +1242,18 @@ function render() {
 
   ctx.restore();
 
+  // touch joystick (screen space, unaffected by shake)
+  if (joy.active) {
+    ctx.strokeStyle = 'rgba(140, 180, 255, .35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(joy.sx, joy.sy, joy.R, 0, TAU); ctx.stroke();
+    const jdx = joy.x - joy.sx, jdy = joy.y - joy.sy, jd = Math.hypot(jdx, jdy) || 1;
+    const k = Math.min(jd, joy.R);
+    ctx.fillStyle = 'rgba(180, 210, 255, .5)';
+    ctx.beginPath(); ctx.arc(joy.sx + jdx / jd * k, joy.sy + jdy / jd * k, 17, 0, TAU); ctx.fill();
+    ctx.lineWidth = 1;
+  }
+
   // faint vignette only
   const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.5, W / 2, H / 2, Math.max(W, H) * 0.78);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
@@ -1285,18 +1337,25 @@ function closeOverlays() {
   for (const id of ['ovTitle', 'ovLevel', 'ovPause', 'ovDead']) $(id).classList.remove('on');
 }
 
+function openPause() {
+  state = ST.PAUSE;
+  $('pauseStats').innerHTML = buildRecapHTML();
+  $('ovPause').classList.add('on');
+}
+
 function handleKey(k) {
   if (state === ST.PLAY) {
-    if (k === 'p' || k === 'escape') {
-      state = ST.PAUSE;
-      $('pauseStats').innerHTML = buildRecapHTML();
-      $('ovPause').classList.add('on');
-    } else if (k === 'm') SFX.toggle();
+    if (k === 'p' || k === 'escape') openPause();
+    else if (k === 'm') SFX.toggle();
   } else if (state === ST.PAUSE && (k === 'p' || k === 'escape')) {
     closeOverlays(); state = ST.PLAY;
   } else if (state === ST.TITLE && k === 'enter') startGame();
   else if (state === ST.DEAD && k === 'enter') startGame();
 }
+$('btnPause').addEventListener('click', () => {
+  if (state === ST.PLAY) openPause();
+  else if (state === ST.PAUSE) { closeOverlays(); state = ST.PLAY; }
+});
 
 function startGame() {
   SFX.init();
@@ -1308,6 +1367,13 @@ function startGame() {
 $('btnStart').addEventListener('click', startGame);
 $('btnRetry').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', () => { closeOverlays(); state = ST.PLAY; });
+
+// touch devices get touch instructions
+if (IS_TOUCH) {
+  const keysEl = document.querySelector('#ovTitle .keys');
+  if (keysEl) keysEl.innerHTML = 'Touch controls: <b>drag anywhere</b> to steer — a light drag moves you ' +
+    'slowly for precise dodging.<br>Your ship fires by itself. Tap <b>⏸</b> for pause &amp; your build.';
+}
 
 // ---------------------------------------------------------------------------
 // Main loop
