@@ -207,7 +207,7 @@ function newRun() {
     gunAcc: 0, novaT: 3, laserT: 3, echoT: 6, rippleT: 12, barrageT: 18,
     rippleActive: 0, bladeCd: [], rampStart: null, rampMult: 1, pulseT: 0, rebirthT: 0, adrenT: 0,
     missileT: 2, turretT: 3, vortexT: 4, heatT: 0,
-    healAcc: 0, healT: 0, xpAcc: 0, xpT: 0, prevSyn: [], pools: [],
+    healAcc: 0, healT: 0, xpAcc: 0, xpT: 0, prevSyn: [], pools: [], marrow: 0, staticT: 0,
     eliteT: 20, eliteSpoils: 0,
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
     turrets: [], vortices: [], booms: [],
@@ -252,6 +252,7 @@ function recompute() {
   s.dmg *= 1 + 0.015 * Math.max(0, (G.level || 1) - 1); // every level-up grows damage
   s.rate *= 1 + 0.03 * G.ess.rate;
   s.maxHp += 10 * G.ess.life;
+  s.maxHp += G.marrow || 0; // SYNERGY Bone Marrow — permanent +1s from heal orbs
 
   for (const u of G.units) walkUnit(u, (key, L) => {
     switch (key) {
@@ -677,11 +678,18 @@ function fireVolley() {
   const s = G.stats;
   const a0 = aimAngle();
   fireFan(a0, s.count, 1);
-  if (s.rear > 0) fireFan(a0 + Math.PI, Math.min(s.rear, s.count), 0.7);        // Rear Guard
+  if (s.rear > 0) {                                                             // Rear Guard
+    const from = G.pB.length;
+    fireFan(a0 + Math.PI, Math.min(s.rear, s.count), 0.7);
+    if (s.syn.hunterswake) { // SYNERGY: rear shots become relentless homers
+      for (let i = from; i < G.pB.length; i++) G.pB[i].homing = Math.max(G.pB[i].homing, 4.5);
+    }
+  }
   if (s.side > 0) {                                                             // Side Cannons
     const nSide = Math.min(s.side, 8);
-    fireFan(a0 + Math.PI / 2, nSide, 0.6);
-    fireFan(a0 - Math.PI / 2, nSide, 0.6);
+    const sa = s.syn.crossfire ? Math.PI / 4 : Math.PI / 2; // SYNERGY: converge forward
+    fireFan(a0 + sa, nSide, 0.6);
+    fireFan(a0 - sa, nSide, 0.6);
   }
   for (let i = 0; i < s.drones; i++) {                                          // Drones copy your shot
     const p = dronePos(i, s.drones);
@@ -725,7 +733,12 @@ function beamFrom(x, y, a, dmg, w, range) {
     const rx = en.x - x, ry = en.y - y;
     const fwd = rx * cos + ry * sin;
     if (fwd < 0 || fwd > range) continue;
-    if (Math.abs(rx * -sin + ry * cos) < w + en.r) hitEnemy(en, dmg);
+    if (Math.abs(rx * -sin + ry * cos) < w + en.r) {
+      hitEnemy(en, dmg);
+      if (G.stats.syn.glacierbeam && en.hp > 0) { // SYNERGY: the beam deep-freezes
+        en.chillT = Math.max(en.chillT, 1.4); en.chillF = 0.65;
+      }
+    }
   }
   G.beams.push({ x, y, a, len: range, w, color: '#8af0ff', t: 0, life: 0.16 });
 }
@@ -772,6 +785,8 @@ function hitEnemy(en, dmg, noArc) {
   G.dmgDealt += d;
   if (s.lifesteal > 0) G.hp = Math.min(s.maxHp, G.hp + d * s.lifesteal);
   if (isCrit) burst(en.x, en.y, '#ffd24a', 3, 150);
+  // SYNERGY Jackpot: crits always explode (noArc guards secondary hits → no recursion)
+  if (isCrit && !noArc && s.syn.jackpot) blast(en.x, en.y, 42, d * 0.4);
   // Chain Arc — lightning jumps to the nearest other enemy
   // (SYNERGY Rail Storm: the chain keeps jumping, 3 hops instead of 1)
   if (!noArc && s.arc > 0 && Math.random() < s.arc) {
@@ -877,6 +892,7 @@ function killEnemy(en) {
   }
   if (s.sparks) blast(en.x, en.y, 46, s.dmg * 0.5);
   if (s.kilnova > 0 && Math.random() < s.kilnova) blast(en.x, en.y, 90, s.dmg * 1.2);
+  if (s.syn.killfrenzy) G.adrenT = Math.max(G.adrenT, 1.2); // SYNERGY: kills surge fire rate
   if (s.scav > 0 && Math.random() < s.scav) {
     poolPush(G.gems, CAP.gems, { x: en.x, y: en.y, v: 0, heal: 7, t: 0 }); // Scavenger orb
   }
@@ -1436,6 +1452,22 @@ function updateEnemy(en, dt) {
   // knockback / vortex-pull velocity with decay
   if (en.kx || en.ky) {
     en.x += en.kx * dt; en.y += en.ky * dt;
+    // SYNERGY Wrecking Ball: an enemy sent flying smashes whatever it hits
+    if (G.stats.syn.wreckingball && (en.smashCd || 0) <= 0 && Math.hypot(en.kx, en.ky) > 220) {
+      nearEnemies(en.x, en.y, en.r + 26, _near);
+      for (const o of _near) {
+        if (o === en || o.hp <= 0) continue;
+        if (dist2(en.x, en.y, o.x, o.y) < (en.r + o.r) * (en.r + o.r)) {
+          en.smashCd = 0.5;
+          hitEnemy(o, G.stats.dmg * 0.8, true);
+          hitEnemy(en, G.stats.dmg * 0.4, true);
+          burst(en.x, en.y, '#ffd24a', 6, 200);
+          en.kx *= 0.4; en.ky *= 0.4;
+          break;
+        }
+      }
+    }
+    if ((en.smashCd || 0) > 0) en.smashCd -= dt;
     const kdec = Math.pow(0.02, dt);
     en.kx *= kdec; en.ky *= kdec;
     if (Math.abs(en.kx) < 1 && Math.abs(en.ky) < 1) { en.kx = 0; en.ky = 0; }
@@ -1455,9 +1487,21 @@ function hurtPlayer(dmg) {
   if (s.dodge > 0 && Math.random() < s.dodge) { // Evasion — the hit never happened
     G.iT = 0.2;
     burst(G.px, G.py, '#baffc8', 6, 160);
+    if (s.syn.mirrorbloom) fireNova(); // SYNERGY: a dodged hit answers with a nova
     return;
   }
-  if (s.thorns > 0) blast(G.px, G.py, 90, s.dmg * (0.4 + 0.2 * s.thorns)); // Thorns
+  if (s.thorns > 0) { // Thorns (SYNERGY Vengeful Spirit: double size + ignites)
+    const vs = s.syn.vengefulspirit;
+    const r = vs ? 180 : 90;
+    blast(G.px, G.py, r, s.dmg * (0.4 + 0.2 * s.thorns));
+    if (vs) {
+      nearEnemies(G.px, G.py, r, _near);
+      for (const o of _near) {
+        if (o.hp <= 0 || dist2(G.px, G.py, o.x, o.y) > r * r) continue;
+        o.burnDps = Math.max(o.burnDps, s.dmg * 0.5); o.burnT = 2.2;
+      }
+    }
+  }
   if (s.adren > 0) G.adrenT = s.adren;                                     // Adrenaline
   if (G.shield > 0) {
     G.shield--;
@@ -1535,7 +1579,8 @@ function update(dt) {
     G.py = clamp(G.py + my * spd * dt, 14, H - 14);
   }
   if (G.iT > 0) G.iT -= dt;
-  if (s.regen > 0) G.hp = Math.min(s.maxHp, G.hp + s.regen * dt);
+  // Regen (SYNERGY Second Heart: ×3 while below 40% HP)
+  if (s.regen > 0) G.hp = Math.min(s.maxHp, G.hp + s.regen * (s.syn.secondheart && G.hp < s.maxHp * 0.4 ? 3 : 1) * dt);
 
   rebuildGrid();
   updateWave(dt);
@@ -1599,7 +1644,25 @@ function update(dt) {
       en.ky += (v.y - en.y) / vd * 700 * dt;
       en.hp -= s.dmg * 1.1 * dt;
       G.dmgDealt += s.dmg * 1.1 * dt;
+      if (s.syn.absolutezero) { en.chillT = Math.max(en.chillT, 0.6); en.chillF = 0.8; } // SYNERGY: frozen solid
       if (en.hp <= 0) killEnemy(en);
+    }
+  }
+  if (s.syn.staticfield && s.slowR > 0) { // SYNERGY: the slow field zaps what's inside
+    G.staticT -= dt;
+    if (G.staticT <= 0) {
+      G.staticT = 0.55;
+      nearEnemies(G.px, G.py, s.slowR, _near);
+      let best = null, bd = s.slowR * s.slowR;
+      for (const o of _near) {
+        if (o.hp <= 0) continue;
+        const q = dist2(G.px, G.py, o.x, o.y);
+        if (q < bd) { bd = q; best = o; }
+      }
+      if (best) {
+        G.beams.push({ x: G.px, y: G.py, a: Math.atan2(best.y - G.py, best.x - G.px), len: Math.sqrt(bd), w: 2.5, color: '#ffe94a', t: 0, life: 0.12 });
+        hitEnemy(best, s.dmg * 0.9, true);
+      }
     }
   }
   if (s.echo) { G.echoT -= dt; if (G.echoT <= 0) { G.echoT = 6; fireVolley(); G.beams.push({ ring: true, x: G.px, y: G.py, r: 40, t: 0, life: 0.2, color: '#8af0ff' }); } }
@@ -1716,7 +1779,20 @@ function update(dt) {
         }
       }
     }
-    if (dead) { G.pB[i] = G.pB[G.pB.length - 1]; G.pB.pop(); }
+    if (dead) {
+      // SYNERGY Hydra: bullets that FADE (hit nothing, ran out of time) split
+      if (b.t >= b.life && !b.shard && s.syn.hydra) {
+        const ha = Math.atan2(b.vy, b.vx);
+        for (const da of [-0.45, 0.45]) {
+          poolPush(G.pB, CAP.pB, {
+            x: b.x, y: b.y, vx: Math.cos(ha + da) * 420, vy: Math.sin(ha + da) * 420,
+            t: 0, life: 0.4, size: Math.max(2.5, b.size * 0.7), dmg: b.dmg * 0.35,
+            pierce: 0, bounce: 0, homing: 0, hit: null, shard: true,
+          });
+        }
+      }
+      G.pB[i] = G.pB[G.pB.length - 1]; G.pB.pop();
+    }
   }
 
   // napalm ground fire
@@ -1792,8 +1868,10 @@ function update(dt) {
       g.x += (G.px - g.x) / d * 480 * dt; g.y += (G.py - g.y) / d * 480 * dt;
     }
     if (d2 < 20 * 20) {
-      if (g.heal) G.hp = Math.min(s.maxHp, G.hp + g.heal); // Scavenger healing orb
-      else { G.xp += g.v * s.xpMult; G.xpAcc += g.v * s.xpMult; } // Greed multiplies gem value
+      if (g.heal) { // Scavenger healing orb
+        G.hp = Math.min(s.maxHp, G.hp + g.heal);
+        if (s.syn.bonemarrow) { G.marrow++; recompute(); G.hp = Math.min(G.stats.maxHp, G.hp + 1); } // SYNERGY: +1 max HP forever
+      } else { G.xp += g.v * s.xpMult; G.xpAcc += g.v * s.xpMult; } // Greed multiplies gem value
       if (s.gemHeal > 0) G.hp = Math.min(s.maxHp, G.hp + s.gemHeal);
       SFX.gem();
       G.gems.splice(i, 1);

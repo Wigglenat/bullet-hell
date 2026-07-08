@@ -63,6 +63,19 @@ screen lists every active synergy.
 | Critical + Graze | **Bullet Waltz** | +10% crit chance while graze-heat is hot |
 | Speed + Shrink | **Phantom Needle** | your hitbox shrinks another 15% |
 | Nova + Frost Shot | **Ice Ring** | nova rings always chill what they touch |
+| + Bullets + Split | **Hydra Rounds** | bullets that fade out split into two live shards |
+| Big Shots + Impact | **Wrecking Ball** | enemies you send flying smash into others for damage |
+| Laser + Frost Shot | **Glacier Beam** | your laser deep-freezes everything it touches |
+| Rapid Fire + Adrenaline | **Kill Frenzy** | every kill surges your fire rate |
+| Chase + Rear Guard | **Hunter's Wake** | rear shots become relentless homers |
+| Side Cannons + Velocity | **Scissor Crossfire** | side cannons angle forward into a converging X |
+| Ghost + Thorns | **Vengeful Spirit** | your pain-burst doubles in size and sets enemies ablaze |
+| Vitality + Regen | **Second Heart** | below 40% HP your regen runs 3× faster |
+| Vitality + Scavenger | **Bone Marrow** | every healing orb also grants +1 max HP, forever |
+| Nova + Evasion | **Mirror Bloom** | every dodged hit answers with a free nova |
+| Critical + Explosive Rounds | **Jackpot Rounds** | critical hits always explode |
+| Frost Shot + Vortex | **Absolute Zero** | vortices freeze what they grind |
+| Slow Field + Chain Arc | **Static Field** | your slow field zaps the enemies inside it |
 
 ## Named elites
 

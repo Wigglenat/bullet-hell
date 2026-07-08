@@ -141,6 +141,19 @@ const SYNERGIES_RAW = [
   ['crit', 'graze',     'bulletwaltz',   'Bullet Waltz',     '+10% crit chance while graze-heat is hot'],
   ['speed', 'shrink',   'phantomneedle', 'Phantom Needle',   'your hitbox shrinks another 15%'],
   ['nova', 'frost',     'icering',       'Ice Ring',         'nova rings always chill what they touch'],
+  ['bullets', 'split',  'hydra',         'Hydra Rounds',     'bullets that fade out split into two live shards'],
+  ['big', 'impact',     'wreckingball',  'Wrecking Ball',    'enemies you send flying smash into others for damage'],
+  ['laser', 'frost',    'glacierbeam',   'Glacier Beam',     'your laser deep-freezes everything it touches'],
+  ['rapid', 'adrenaline', 'killfrenzy',  'Kill Frenzy',      'every kill surges your fire rate'],
+  ['chase', 'rear',     'hunterswake',   "Hunter's Wake",    'rear shots become relentless homers'],
+  ['side', 'velocity',  'crossfire',     'Scissor Crossfire', 'side cannons angle forward into a converging X'],
+  ['ghost', 'thorns',   'vengefulspirit', 'Vengeful Spirit', 'your pain-burst doubles in size and sets enemies ablaze'],
+  ['vitality', 'regen', 'secondheart',   'Second Heart',     'below 40% HP your regen runs 3× faster'],
+  ['vitality', 'scavenger', 'bonemarrow', 'Bone Marrow',     'every healing orb also grants +1 max HP, forever'],
+  ['nova', 'dodge',     'mirrorbloom',   'Mirror Bloom',     'every dodged hit answers with a free nova'],
+  ['crit', 'boom',      'jackpot',       'Jackpot Rounds',   'critical hits always explode'],
+  ['frost', 'vortex',   'absolutezero',  'Absolute Zero',    'vortices freeze what they grind'],
+  ['slow', 'arc',       'staticfield',   'Static Field',     'your slow field zaps the enemies inside it'],
 ];
 const SYNERGIES = {};
 for (const [a, b, slug, name, desc] of SYNERGIES_RAW) {
