@@ -12,11 +12,11 @@ Your ship fires by itself — you **dodge** and collect XP gems. The arena is
 zoomed out for real maneuvering room. **Every level-up grants a random power
 automatically — the game never stops for a menu.** The grant is announced
 right on the battlefield ("Shield Lv 3 — +1 shield charge") and drawn from
-the 43 classics:
+the 42 classics:
 
 | Attack | Defense | Utility |
 |---|---|---|
-| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Fire Rounds (burn), Splash Rounds (AoE), Explosive Rounds, Frost Shot, Impact, Turret, Vortex, Range (+20% shot range per level — beat the drop-off) | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger, Ram | Speed, Magnetic, Slow Field, Greed, Adrenaline, Shrink, Graze |
+| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Fire Rounds (burn), Splash Rounds (AoE), Explosive Rounds, Frost Shot, Impact, Turret, Vortex, Range (+20% shot range per level — beat the drop-off) | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger | Speed, Magnetic, Slow Field, Greed (richer gems + bonus drops), Adrenaline, Shrink, Graze |
 
 The draw is weighted toward **deepening what you already own** — especially
 powers one level from fusing — so merges keep happening. Check your full
@@ -57,7 +57,7 @@ screen lists every active synergy.
 | Drones + Laser | **Beam Drones** | your drones fire mini-beams alongside your laser |
 | Fire Rounds + Orbitals | **Flame Wheel** | orbital blades set enemies on fire |
 | Missiles + Turret | **Missile Battery** | turret shots explode on impact |
-| Impact + Ram | **Battering Ram** | ramming blasts everything around you backwards |
+| Magnetic + Greed | **Gold Rush** | gems fly to you from across the arena, worth +25% |
 | Shield + Thorns | **Retaliation Aegis** | shield blocks detonate a huge thorn burst |
 | Lifesteal + Executioner | **Soul Harvest** | executions heal 2% of your max HP |
 | Critical + Graze | **Bullet Waltz** | +10% crit chance while graze-heat is hot |
@@ -122,7 +122,7 @@ relic +25% stronger.
 There is **no build limit** — stack as many powers as the run gives you, and a
 fused-away classic can be picked up fresh and grown again. Every fusion pair
 has its own **thematic name** (Lifesteal + Thorns = **Blood Barrier**,
-Chase + Fire Rounds = **Hellhound Rounds** — all 946 combinations are named),
+Chase + Fire Rounds = **Hellhound Rounds** — all 903 combinations are named),
 and the pause screen (`P`) lists every effect in plain numbers.
 
 ## Controls

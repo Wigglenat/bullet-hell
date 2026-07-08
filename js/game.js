@@ -245,7 +245,7 @@ function recompute() {
     scav: 0, xpMult: 1, adren: 0, hitR: 3.5,
     drones: 0, missiles: 0, missileCd: 0, boom: 0,
     frost: 0, knock: 0, turrets: 0, turretCd: 0, vortex: 0, vortexCd: 0,
-    graze: 0, grazeR: 0, grazeHeat: 0, ram: 0, range: 1,
+    graze: 0, grazeR: 0, grazeHeat: 0, range: 1, bonusGem: 0,
     syn: {}, synList: [], bulletCol: '#6edcff',
   };
   s.dmg *= 1 + 0.04 * G.ess.dmg;
@@ -286,7 +286,8 @@ function recompute() {
       case 'armor':     s.armor += 1.5 * L; break;
       case 'dodge':     s.dodge = Math.min(0.5, s.dodge + 0.04 * L); break;
       case 'scavenger': s.scav = Math.min(0.55, s.scav + 0.05 * L); break;
-      case 'greed':     s.xpMult += 0.10 * L; break;
+      case 'greed':     s.xpMult += 0.15 * L; // richer gems
+                        s.bonusGem = Math.min(0.6, s.bonusGem + 0.10 * L); break; // + bonus drops
       case 'adrenaline':s.adren = Math.max(s.adren, 3 + 0.5 * L); break;
       case 'shrink':    s.hitR = Math.min(s.hitR, Math.max(1.6, 3.5 * (1 - 0.06 * Math.min(L, 9)))); break;
       case 'drones':    s.drones = Math.min(6, s.drones + Math.round(L)); break;
@@ -302,7 +303,6 @@ function recompute() {
       case 'vortex':    s.vortex += L; s.vortexCd = Math.max(3.5, 7 - 0.3 * L); break;
       case 'graze':     s.graze += L; s.grazeR = Math.min(64, 30 + 2.5 * L);
                         s.grazeHeat = Math.min(0.5, 0.05 * L + s.grazeHeat); break;
-      case 'ram':       s.ram += 0.35 * L; break;
       case 'range':     s.range = Math.min(3, s.range + 0.20 * L); break; // shots travel farther
     }
   });
@@ -399,6 +399,7 @@ function recompute() {
   }
   if (s.syn.stormseek) s.arc = Math.min(0.8, s.arc + 0.15);
   if (s.syn.phantomneedle) s.hitR = Math.max(1.3, s.hitR * 0.85);
+  if (s.syn.goldrush) { s.magnetR = Math.max(s.magnetR, Math.max(W, H)); s.xpMult += 0.25; } // gems from anywhere
 
   // bullet tint — your shots visibly carry your build's elements
   const TINTS = { bomb: '#ff8a3a', frost: '#7adfff', arc: '#ffe94a', boom: '#ff6a4a', chase: '#c8a0ff', crit: '#ffd24a' };
@@ -825,6 +826,9 @@ function killEnemy(en) {
   for (let i = 0; i < gems; i++) {
     poolPush(G.gems, CAP.gems, { x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp / gems)), t: 0 });
   }
+  if (s.bonusGem > 0 && Math.random() < s.bonusGem) { // Greed — a bonus gem on top
+    poolPush(G.gems, CAP.gems, { x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp * 0.5)), t: 0 });
+  }
   if (en.superBoss) { // a Warden falls
     const tier = en.wtier || 'sector';
     const T = WARDEN_TIERS[tier];
@@ -953,7 +957,7 @@ function spawnEnemy(type, x, y, hpMult) {
     speed: T.speed * (1 + totalWave() * 0.006) * jSp, dmg: T.dmg * (1 + totalWave() * 0.025) * (1 + (G.ngPlus || 0) * 0.75),
     color: T.color, xp: T.xp, t: rand(0, 9), shootT: rand(1.2, 2.6),
     boss, dashT: 0, dvx: 0, dvy: 0, ang: Math.random() * TAU,
-    dead: false, flash: 0, kx: 0, ky: 0, chillT: 0, chillF: 0, ramCd: 0, elite: false, burnT: 0, burnDps: 0,
+    dead: false, flash: 0, kx: 0, ky: 0, chillT: 0, chillF: 0, elite: false, burnT: 0, burnDps: 0,
     mode: 'approach', modeT: 0, lockX: 0, lockY: 0,
   };
   if (en.boss) {
@@ -1143,7 +1147,6 @@ function updateEnemy(en, dt) {
   en.t += dt;
   if (en.flash > 0) en.flash -= dt;
   if (en.chillT > 0) en.chillT -= dt;
-  if (en.ramCd > 0) en.ramCd -= dt;
   if (en.burnT > 0) { // Fire Rounds — burning over time
     en.burnT -= dt;
     en.hp -= en.burnDps * dt;
@@ -1439,21 +1442,6 @@ function updateEnemy(en, dt) {
   }
   en.x = clamp(en.x, -60, W + 60); en.y = clamp(en.y, -60, H + 60);
   if (dist2(en.x, en.y, G.px, G.py) < (en.r + 8) * (en.r + 8)) {
-    const s = G.stats;
-    if (s.ram > 0 && en.ramCd <= 0) {         // Ram — contact hurts THEM
-      en.ramCd = 0.3;
-      hitEnemy(en, s.dmg * s.ram, true);
-      if (s.syn.batteringram) { // SYNERGY: collisions shockwave everything back
-        nearEnemies(G.px, G.py, 140, _near);
-        for (const o of _near) {
-          if (o.boss || o.hp <= 0) continue;
-          const od = Math.hypot(o.x - G.px, o.y - G.py) || 1;
-          o.kx += (o.x - G.px) / od * 320; o.ky += (o.y - G.py) / od * 320;
-        }
-        burst(G.px, G.py, '#ffd24a', 10, 260);
-      }
-      if (en.hp <= 0) return;
-    }
     if (G.iT <= 0) hurtPlayer(en.dmg);
   }
 }
@@ -1779,8 +1767,8 @@ function update(dt) {
     // Graze (Touhou-style): a bullet skimming past grants XP and heats your damage
     if (s.graze > 0 && !b.grazed && pd2 < s.grazeR * s.grazeR && pd2 > (b.size + s.hitR + 5) * (b.size + s.hitR + 5)) {
       b.grazed = true;
-      G.xp += 0.2 + 0.1 * s.graze;
-      G.xpAcc += 0.2 + 0.1 * s.graze;
+      G.xp += (0.2 + 0.1 * s.graze) * s.xpMult; // Greed pays on graze XP too
+      G.xpAcc += (0.2 + 0.1 * s.graze) * s.xpMult;
       G.heatT = 3;
       burst(b.x, b.y, '#ffffff', 1, 60);
       checkLevel();
@@ -2305,6 +2293,7 @@ function buildRecapHTML() {
     (s.splashR ? ` · splash ${Math.round(s.splashR)}px` : '') +
     (s.range > 1 ? ` · range +${Math.round((s.range - 1) * 100)}%` : '') +
     (s.xpMult > 1 ? ` · xp +${Math.round((s.xpMult - 1) * 100)}%` : '') +
+    (s.bonusGem > 0 ? ` · bonus gems ${Math.round(s.bonusGem * 100)}%` : '') +
     (s.hitR < 3.5 ? ` · hitbox −${Math.round((1 - s.hitR / 3.5) * 100)}%` : '');
   const synLine = s.synList.length
     ? `<div style="margin-top:8px;color:#ffd24a;font-size:12px">SYNERGIES: ${s.synList.map(x => `<b>${x.name}</b> — ${x.desc}`).join(' · ')}</div>` : '';
