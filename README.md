@@ -8,16 +8,19 @@ no build step, no dependencies.
 
 ## How it plays
 
-Your ship fires by itself — you **dodge**, collect XP gems, and pick upgrades.
-The arena is zoomed out for real maneuvering room. Every level-up offers 3
-cards from the 43 classics:
+Your ship fires by itself — you **dodge** and collect XP gems. The arena is
+zoomed out for real maneuvering room. **Every level-up grants a random power
+automatically — the game never stops for a menu.** The grant is announced
+right on the battlefield ("Shield Lv 3 — +1 shield charge") and drawn from
+the 43 classics:
 
 | Attack | Defense | Utility |
 |---|---|---|
 | + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Fire Rounds (burn), Splash Rounds (AoE), Explosive Rounds, Frost Shot, Impact, Turret, Vortex, Range (+20% shot range per level — beat the drop-off) | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger, Ram | Speed, Magnetic, Slow Field, Greed, Adrenaline, Shrink, Graze |
 
-Every card says exactly what it does ("+1 bullet", "+3% lifesteal", "+1 shield
-charge"). Picking the same family again levels it up.
+The draw is weighted toward **deepening what you already own** — especially
+powers one level from fusing — so merges keep happening. Check your full
+build any time with `P`.
 
 ## Automatic fusion — no menus
 
@@ -65,10 +68,10 @@ screen lists every active synergy.
 
 Gold-ringed, personally named horrors — **VORAX THE HUNGERING**, **NYXA
 STAR-EATER** — stalk in from wave 2 onward. They're tanky, fast, and worth it:
-a burst of XP gems plus an **ELITE SPOILS** level-up where every card grants
-**double levels** and the Primordial roll is boosted to **0.5%** (×50).
-Spoils draws only offer level-ups, so elite hunting is the fastest road to
-your next fusion.
+a burst of XP gems plus an instant **ELITE SPOILS** grant at **double levels**
+with the Primordial roll boosted to **0.5%** (×50). Spoils grants only deepen
+powers you already own, so elite hunting is the fastest road to your next
+fusion.
 
 ## Sectors & the Warden
 
@@ -79,18 +82,18 @@ dodges and it's **EXHAUSTED** for four seconds — that gold ring is your punish
 window. It holds mid-range, switches patterns based on your distance, and
 enrages below 40% HP.
 
-Kill it and the sector is cleared: half your HP back, a **SECTOR SPOILS** draw
-with double levels and **1.01% Primordial odds** (base 0.01% + a flat 1%), and
-Sector N+1 begins at wave 1 with difficulty carrying over.
+Kill it and the sector is cleared: half your HP back, an instant **SECTOR
+SPOILS** grant at double levels with **1.01% Primordial odds** (base 0.01% + a
+flat 1%), and Sector N+1 begins at wave 1 with difficulty carrying over.
 
 ### The Warden hierarchy
 
-| Total wave | Boss | Crazy abilities | Spoils |
+| Total wave | Boss | Crazy abilities | Spoils (granted instantly) |
 |---|---|---|---|
-| every 100 | **SECTOR WARDEN** | sidestep-dodges your shots (3, then exhausted), range-adaptive patterns, enrage | 1 draw · 1.01% Primordial |
-| every 1,000 | **GALAXY WARDEN** | **blinks** (teleports) out of your fire, **splits phantom clones** at ⅔ and ⅓ HP, **inhales** — eats your bullets while dragging you in | 2 draws · 2.01% |
-| every 10,000 | **UNIVERSE WARDEN** | all of the above + **armored face / glowing weak point on its back** (25% / 150% damage), an **echo of your own ship** hunting you, and a REALIGNMENT pulse that re-aims every bullet on screen at you | 3 draws · 5.01% + **one guaranteed Primordial** |
-| wave 100,000 | **THE LAST SOUL — END OF ALL THINGS** | everything at once, plus desperation bullet-walls with escape gaps below 15% HP | 3 draws of **pure Primordial** |
+| every 100 | **SECTOR WARDEN** | sidestep-dodges your shots (3, then exhausted), range-adaptive patterns, enrage | 1 grant · 1.01% Primordial |
+| every 1,000 | **GALAXY WARDEN** | **blinks** (teleports) out of your fire, **splits phantom clones** at ⅔ and ⅓ HP, **inhales** — eats your bullets while dragging you in | 2 grants · 2.01% |
+| every 10,000 | **UNIVERSE WARDEN** | all of the above + **armored face / glowing weak point on its back** (25% / 150% damage), an **echo of your own ship** hunting you, and a REALIGNMENT pulse that re-aims every bullet on screen at you | 3 grants · 5.01% + **one guaranteed Primordial** |
+| wave 100,000 | **THE LAST SOUL — END OF ALL THINGS** | everything at once, plus desperation bullet-walls with escape gaps below 15% HP | 3 grants of **pure Primordial** |
 
 Beat THE LAST SOUL and the run doesn't end — it begins again: **NG+**. You keep
 your entire build (every fusion, star, essence, and relic); the universe
@@ -100,9 +103,9 @@ badge. There is no top.
 ## 🜏 Primordial — the 0.01% tier
 
 Above Mythic sits **Primordial**: not craftable, not fusable. Every level-up
-card slot has a **1-in-10,000 (0.01%)** chance to be replaced by a glowing
-crimson Primordial relic. Relics ignore the normal stat caps, **don't take a
-build slot**, and each one warps the run:
+rolls three slots, each with a **1-in-10,000 (0.01%)** chance of a glowing
+crimson Primordial relic — and if one rolls, you get it. Relics ignore the
+normal stat caps, **don't take a build slot**, and each one warps the run:
 
 | Relic | What it does |
 |---|---|
@@ -113,8 +116,8 @@ build slot**, and each one warps the run:
 | **ALPHA SWARM** | +8 orbital blades; every kill bursts into homing shards |
 | **OMEGA PROTOCOL** | apocalypse barrage every 12s, +3 shields at double regen, massive splash on every bullet |
 
-Relics can level (rarely offered as cards): each level makes the whole relic
-+25% stronger.
+Relics can level (rare among the auto-grants): each level makes the whole
+relic +25% stronger.
 
 There is **no build limit** — stack as many powers as the run gives you, and a
 fused-away classic can be picked up fresh and grown again. Every fusion pair
@@ -137,8 +140,8 @@ and the pause screen (`P`) lists every effect in plain numbers.
 **Mobile / touch** — drag anywhere on the battlefield to steer with a floating
 analog joystick: a full drag is full speed, a **light drag moves you slowly**
 (that's your focus mode, and it shows the hitbox). Tap **⏸** (top-right) for
-pause + build info, or **▶▶** next to it to cycle game speed. Level-up cards
-and menus are tappable.
+pause + build info, or **▶▶** next to it to cycle game speed. Menus are
+tappable — and since upgrades apply themselves, you never stop flying.
 
 Readability rules: enemy bullets are magenta/white and always drawn on top;
 your bullets are quiet cyan; bosses (every 10th wave) get a name and an HP bar.

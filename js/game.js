@@ -431,8 +431,7 @@ function recompute() {
 function applyCard(card) {
   if (card.type === 'new') {
     if (!FAMILIES[card.key]) return;
-    G.units.push(makeFamilyUnit(card.key));
-    announce(FAMILIES[card.key].name + ' acquired', CATS[FAMILIES[card.key].cat].color);
+    G.units.push(makeFamilyUnit(card.key)); // announced by autoLevelUp's grant line
   } else if (card.type === 'level') {
     card.u.level++;
   } else if (card.type === 'ess') {
@@ -520,70 +519,43 @@ const ESS_INFO = {
   life: { name: 'Essence of Life',  desc: 'Heal 40 HP and gain +10 max HP.', color: '#54d68a' },
 };
 
-function cardHTML(card) {
-  if (card.type === 'primordial') {
-    const P = PRIMORDIALS[card.key], T = TIERS[6];
-    return { border: T.color, cls: 'cardPrimordial', html: `
-      <span class="tierTag" style="border-color:${T.color};color:${T.color}">${T.jp} PRIMORDIAL · 1 in 10,000</span>
-      <h3>🜏 ${P.name}</h3>
-      <div class="desc">${P.desc}</div>` };
-  }
+// ---------------------------------------------------------------------------
+// AUTO level-ups — the game NEVER stops. Every level instantly grants a
+// random power (same weighted pool, same Primordial odds, same spoils rules
+// as the old card draw) and announces it on the battlefield.
+// ---------------------------------------------------------------------------
+const SPOILS_INFO = {
+  sector:   { chance: PRIMORDIAL_CHANCE + 0.01, force: 0, label: '⚔ SECTOR SPOILS' },
+  galaxy:   { chance: PRIMORDIAL_CHANCE + 0.02, force: 0, label: '⚔ GALAXY SPOILS' },
+  universe: { chance: PRIMORDIAL_CHANCE + 0.05, force: 1, label: '⚔ UNIVERSE SPOILS' },
+  final:    { chance: 1,                        force: 3, label: '☠ THE LAST SPOILS' },
+  elite:    { chance: PRIMORDIAL_CHANCE * 50,   force: 0, label: '★ ELITE SPOILS' },
+};
+
+// one readable line for what the level-up granted (called AFTER applying,
+// so u.level is already the new level)
+function grantText(card) {
+  if (card.type === 'primordial') return { txt: '🜏 ' + PRIMORDIALS[card.key].name, color: TIERS[6].color };
   if (card.type === 'new') {
-    const F = FAMILIES[card.key], C = CATS[F.cat];
-    return { border: C.color, html: `
-      <span class="tierTag" style="border-color:${C.color};color:${C.color}">NEW · ${C.label}</span>
-      <h3>${F.name}</h3>
-      <div class="desc">${F.desc}</div>` };
+    const F = FAMILIES[card.key];
+    return { txt: '+ ' + F.name + ' — ' + F.next, color: CATS[F.cat].color };
   }
-  if (card.type === 'level') {
-    const u = card.u;
-    if (u.kind === 'primordial') {
-      const P = PRIMORDIALS[u.key], T = TIERS[6];
-      return { border: T.color, cls: 'cardPrimordial', html: `
-        <span class="tierTag" style="border-color:${T.color};color:${T.color}">${T.jp} Primordial · Lv ${u.level} → ${u.level + 1}</span>
-        <h3>🜏 ${P.name}</h3>
-        <div class="desc">${P.desc}<br><b style="color:${T.color}">Next: all of it, +25% stronger</b></div>` };
-    }
-    if (u.kind === 'family') {
-      const F = FAMILIES[u.key], C = CATS[F.cat];
-      return { border: C.color, html: `
-        <span class="tierTag" style="border-color:${C.color};color:${C.color}">${C.label} · Lv ${u.level} → ${u.level + 1}</span>
-        <h3>${F.name}</h3>
-        <div class="desc">${F.desc}<br><b style="color:${C.color}">Next: ${F.next}</b></div>` };
-    }
-    const T = TIERS[u.tier], sum = unitSummary(u);
-    return { border: T.color, html: `
-      <span class="tierTag" style="border-color:${T.color};color:${T.color}">${T.jp} ${T.name} · Lv ${u.level} → ${u.level + 1}</span>
-      <h3>${'★'.repeat(Math.min(u.stars, 5))} ${u.name}</h3>
-      <div class="desc">All of it, +10% stronger:<br>${sum.effects.join(' · ')}
-      ${sum.specials.length ? '<br><b>' + sum.specials.join(' · ') + '</b>' : ''}</div>` };
+  if (card.type === 'ess') return { txt: '+ ' + ESS_INFO[card.key].name, color: ESS_INFO[card.key].color };
+  const u = card.u;
+  if (u.kind === 'primordial') return { txt: '🜏 ' + PRIMORDIALS[u.key].name + ' Lv ' + u.level + ' (+25%)', color: TIERS[6].color };
+  if (u.kind === 'family') {
+    const F = FAMILIES[u.key];
+    return { txt: F.name + ' Lv ' + u.level + ' — ' + F.next, color: CATS[F.cat].color };
   }
-  const E = ESS_INFO[card.key];
-  return { border: E.color, html: `
-    <span class="tierTag" style="border-color:${E.color};color:${E.color}">Essence</span>
-    <h3>${E.name}</h3>
-    <div class="desc">${E.desc}</div>` };
+  return { txt: u.name + ' Lv ' + u.level + ' (+10%)', color: TIERS[u.tier].color };
 }
 
-function openLevelUp() {
-  state = ST.LEVELUP;
+function autoLevelUp(slot) {
   G.pendingLevels--;
-  SFX.level();
   let spoils = null; // warden spoils outrank elite spoils
   if (G.spoilsQueue.length) spoils = G.spoilsQueue.shift();
   else if (G.eliteSpoils > 0) { G.eliteSpoils--; spoils = 'elite'; }
-  const SPOILS_INFO = {
-    sector:   { chance: PRIMORDIAL_CHANCE + 0.01, force: 0, label: '⚔ SECTOR SPOILS — DOUBLE levels · Primordial odds 1.01% (0.01% + 1%)' },
-    galaxy:   { chance: PRIMORDIAL_CHANCE + 0.02, force: 0, label: '⚔ GALAXY SPOILS — DOUBLE levels · Primordial odds 2.01%' },
-    universe: { chance: PRIMORDIAL_CHANCE + 0.05, force: 1, label: '⚔ UNIVERSE SPOILS — DOUBLE levels · 5.01% + one GUARANTEED Primordial' },
-    final:    { chance: 1,                        force: 3, label: '☠ THE LAST SPOILS — pure Primordial' },
-    elite:    { chance: PRIMORDIAL_CHANCE * 50,   force: 0, label: '★ ELITE SPOILS — cards grant DOUBLE levels · Primordial odds ×50' },
-  };
   const SP = spoils ? SPOILS_INFO[spoils] : null;
-  const subEl = document.querySelector('#ovLevel .sub');
-  if (subEl) subEl.textContent = SP ? SP.label : 'Choose one.';
-  const wrap = document.getElementById('cards');
-  wrap.innerHTML = '';
   const cards = drawCards(3, !!spoils);
   // PRIMORDIAL roll — 0.01% base, boosted by spoils tier
   const primChance = SP ? SP.chance : PRIMORDIAL_CHANCE;
@@ -598,25 +570,23 @@ function openLevelUp() {
     if (Math.random() >= primChance) continue;
     cards[i] = primCard();
   }
-  for (const card of cards) {
-    const info = cardHTML(card);
-    const el = document.createElement('div');
-    el.className = 'card' + (info.cls ? ' ' + info.cls : '');
-    el.style.borderColor = info.border;
-    el.innerHTML = info.html;
-    el.addEventListener('click', () => {
-      applyCard(card);
-      if (spoils && card.type === 'level' && card.u.level < TIERS[card.u.tier].maxLevel) {
-        applyCard(card); // elite spoils: double level
-      }
-      G.hp = Math.min(G.stats.maxHp, G.hp + G.stats.maxHp * 0.15);
-      closeOverlays();
-      if (G.pendingLevels > 0) openLevelUp();
-      else state = ST.PLAY;
-    });
-    wrap.appendChild(el);
+  if (!cards.length) return;
+  // auto-pick: take a rolled Primordial (any player would); otherwise random
+  const card = cards.find(c => c.type === 'primordial') || cards[(Math.random() * cards.length) | 0];
+  applyCard(card);
+  let doubled = false;
+  if (spoils && card.type === 'level' && card.u.level < TIERS[card.u.tier].maxLevel) {
+    applyCard(card); // spoils: double level
+    doubled = true;
   }
-  document.getElementById('ovLevel').classList.add('on');
+  G.hp = Math.min(G.stats.maxHp, G.hp + G.stats.maxHp * 0.15); // level-up heal
+  const gt = grantText(card);
+  G.floats.push({
+    x: G.px, y: G.py - 34 - slot * 20,
+    txt: (SP ? SP.label + ' · ' : '') + gt.txt + (doubled ? ' ×2' : ''),
+    color: SP ? '#ffd24a' : gt.color, t: 0, life: 1.6,
+  });
+  if (G.floats.length > 24) G.floats.shift();
 }
 
 // ---------------------------------------------------------------------------
@@ -1842,7 +1812,11 @@ function update(dt) {
       checkLevel();
     }
   }
-  if (G.pendingLevels > 0 && state === ST.PLAY) openLevelUp();
+  if (G.pendingLevels > 0) { // auto-apply every pending level — no pausing
+    SFX.level();
+    let slot = 0;
+    while (G.pendingLevels > 0 && slot < 24) autoLevelUp(slot++);
+  }
 
   // fusion banners (level-ups never wait on these; queued banners play faster)
   if (G.bannerT > 0) G.bannerT -= dt;
@@ -2356,7 +2330,7 @@ function die() {
 }
 
 function closeOverlays() {
-  for (const id of ['ovTitle', 'ovLevel', 'ovPause', 'ovDead']) $(id).classList.remove('on');
+  for (const id of ['ovTitle', 'ovPause', 'ovDead']) $(id).classList.remove('on');
 }
 
 function openPause() {
@@ -2454,7 +2428,8 @@ window.__GAME__ = {
   },
   SYNERGIES, synergiesOfUnit,
   fireVolley, fireLaser, spawnElite, startSuperBoss, totalWave, wardenTier, WARDEN_TIERS, ETYPES, waveScale, maxShooters, shooterCount,
-  hitEnemy, blast, boomFx,
+  hitEnemy, blast, boomFx, recompute,
+  SPOILS_INFO,
   setSimSpeed, cycleSpeed,
   get simSpeed() { return simSpeed; },
   kill(en) { killEnemy(en); },
