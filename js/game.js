@@ -105,10 +105,15 @@ function healSprite() {
 // Tiny synth
 // ---------------------------------------------------------------------------
 const SFX = (() => {
-  let ac = null, muted = false;
+  let ac = null, muted = false, turbo = false, tLast = 0;
   function init() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } }
   function blip(freq, dur, type, vol) {
     if (!ac || muted) return;
+    if (turbo) { // extreme game speeds: rate-limit to ~12 blips/s so audio survives
+      const now = performance.now();
+      if (now - tLast < 80) return;
+      tLast = now;
+    }
     const o = ac.createOscillator(), g = ac.createGain();
     o.type = type; o.frequency.value = freq;
     g.gain.setValueAtTime(vol, ac.currentTime);
@@ -118,6 +123,7 @@ const SFX = (() => {
   }
   return {
     init, toggle() { muted = !muted; return muted; },
+    setTurbo(v) { turbo = v; },
     kill()  { blip(rand(180, 240), 0.06, 'square', 0.02); },
     hurt()  { blip(90, 0.25, 'sawtooth', 0.06); },
     gem()   { blip(rand(900, 1080), 0.04, 'sine', 0.015); },
@@ -176,15 +182,22 @@ cv.addEventListener('touchcancel', joyEnd);
 const ST = { TITLE: 0, PLAY: 1, LEVELUP: 2, PAUSE: 3, DEAD: 4 };
 let state = ST.TITLE;
 
-// Game speed — fast-forward the whole sim (×1 → ×2 → ×3 → ×4). Everything runs
-// identically, just faster: more fixed steps per rendered frame.
-const SIM_SPEEDS = [1, 2, 3, 4];
+// Game speed — fast-forward the whole sim (×1 → ×2 → ×3 → ×4 → ×100).
+// Everything runs identically, just faster: more fixed steps per rendered
+// frame. ×100 is the level-grind gear — it runs as many steps as the CPU
+// affords within a per-frame wall-clock budget, and the SFX rate-limit.
+const SIM_SPEEDS = [1, 2, 3, 4, 100];
 let simSpeed = 1;
 function setSimSpeed(v) {
   simSpeed = SIM_SPEEDS.includes(v) ? v : 1;
+  SFX.setTurbo(simSpeed >= 10);
   const b = document.getElementById('btnSpeed');
-  if (b) { b.textContent = '▶▶ ' + simSpeed + '×'; b.classList.toggle('hot', simSpeed > 1); }
-  if (G.floats) announce('GAME SPEED ×' + simSpeed, '#8ae8ff');
+  if (b) {
+    b.textContent = '▶▶ ' + simSpeed + '×';
+    b.classList.toggle('hot', simSpeed > 1 && simSpeed < 10);
+    b.classList.toggle('ultra', simSpeed >= 10);
+  }
+  if (G.floats) announce('GAME SPEED ×' + simSpeed, simSpeed >= 10 ? '#ff5f6d' : '#8ae8ff');
 }
 function cycleSpeed() {
   setSimSpeed(SIM_SPEEDS[(SIM_SPEEDS.indexOf(simSpeed) + 1) % SIM_SPEEDS.length]);
@@ -2453,7 +2466,13 @@ function frame(now) {
   if (state === ST.PLAY) {
     acc += ft * simSpeed;
     let n = 0;
-    while (acc >= STEP && n++ < 4 * simSpeed) { update(STEP); acc -= STEP; }
+    // wall-clock budget: at extreme speeds run as many steps as ~24ms affords,
+    // then drop the backlog — rendering stays responsive, speed degrades gracefully
+    const tEnd = performance.now() + 24;
+    while (acc >= STEP && n++ < 4 * simSpeed) {
+      update(STEP); acc -= STEP;
+      if ((n & 7) === 0 && performance.now() > tEnd) break;
+    }
     if (acc >= STEP) acc = 0;
     updateHUD();
   }

@@ -146,7 +146,7 @@ and the pause screen (`P`) lists every effect in plain numbers.
 |---|---|
 | `WASD` / arrows | move |
 | `Shift` | focus — slow, precise movement (your red hitbox dot is always visible) |
-| `F` | game speed ×1 → ×2 → ×3 → ×4 (whole sim fast-forwards) |
+| `F` | game speed ×1 → ×2 → ×3 → ×4 → **×100** (whole sim fast-forwards — ×100 is the level-grind gear) |
 | `P` / `Esc` | pause + full build breakdown |
 | `M` | mute |
 
