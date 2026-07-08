@@ -120,6 +120,13 @@
     background: rgba(10, 14, 28, .7); color: var(--ink); font-size: 18px;
     pointer-events: auto; z-index: 5; }
   body.touch #btnPause { display: flex; }
+  #btnSpeed { position: absolute; display: flex; align-items: center; justify-content: center;
+    top: calc(38px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
+    min-width: 56px; height: 34px; padding: 0 10px; border-radius: 17px; border: 1.5px solid var(--line);
+    background: rgba(10, 14, 28, .7); color: var(--ink); font-size: 13px; font-weight: 700;
+    pointer-events: auto; z-index: 5; cursor: pointer; user-select: none; }
+  #btnSpeed.hot { color: #8ae8ff; border-color: #8ae8ff; box-shadow: 0 0 10px rgba(138, 232, 255, .35); }
+  body.touch #btnSpeed { right: calc(66px + env(safe-area-inset-right)); height: 44px; border-radius: 22px; }
   .hudTop { padding-top: env(safe-area-inset-top); padding-left: env(safe-area-inset-left); }
   #powerChips { padding-bottom: env(safe-area-inset-bottom); }
   @media (max-width: 700px) {
@@ -154,10 +161,11 @@
       <div class="stat hideMobile">Best <b id="bestNum">0</b></div>
     </div>
     <div id="btnPause">⏸</div>
+    <div id="btnSpeed">▶▶ 1×</div>
     <div id="bossBar"><div id="bossName"></div><div class="bar"><i></i></div></div>
     <div id="fusionBanner"><div class="fTitle"></div><div class="fSub"></div></div>
     <div id="powerChips"></div>
-    <div id="hintBar"><kbd>WASD</kbd> move · <kbd>Shift</kbd> focus · <kbd>P</kbd> pause &amp; build info</div>
+    <div id="hintBar"><kbd>WASD</kbd> move · <kbd>Shift</kbd> focus · <kbd>F</kbd> game speed · <kbd>P</kbd> pause &amp; build info</div>
   </div>
 
   <div id="ovTitle" class="overlay on"><div class="panel">
@@ -168,7 +176,7 @@
       strong enough they <b>auto-merge</b> into something greater. Hunt the gold-ringed
       <b style="color:#ffd24a">named elites</b> for spoils. Keep going. There is no top.</div>
     <div class="tierRow">
-      <div class="tierBox" style="border-color:var(--t1);color:var(--t1)"><b>Base</b><small>the 42 classics</small></div>
+      <div class="tierBox" style="border-color:var(--t1);color:var(--t1)"><b>Base</b><small>the 43 classics</small></div>
       <div class="tierBox" style="border-color:var(--t2);color:var(--t2)"><b>Fused</b><small>2 maxed classics</small></div>
       <div class="tierBox" style="border-color:var(--t3);color:var(--t3)"><b>Ascended</b><small>2 Fused</small></div>
       <div class="tierBox" style="border-color:var(--t4);color:var(--t4)"><b>Transcendent</b><small>2 Ascended</small></div>

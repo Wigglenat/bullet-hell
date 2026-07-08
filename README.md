@@ -10,11 +10,11 @@ no build step, no dependencies.
 
 Your ship fires by itself — you **dodge**, collect XP gems, and pick upgrades.
 The arena is zoomed out for real maneuvering room. Every level-up offers 3
-cards from the 42 classics:
+cards from the 43 classics:
 
 | Attack | Defense | Utility |
 |---|---|---|
-| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Fire Rounds (burn), Splash Rounds (AoE), Explosive Rounds, Frost Shot, Impact, Turret, Vortex | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger, Ram | Speed, Magnetic, Slow Field, Greed, Adrenaline, Shrink, Graze |
+| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Fire Rounds (burn), Splash Rounds (AoE), Explosive Rounds, Frost Shot, Impact, Turret, Vortex, Range (+20% shot range per level — beat the drop-off) | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger, Ram | Speed, Magnetic, Slow Field, Greed, Adrenaline, Shrink, Graze |
 
 Every card says exactly what it does ("+1 bullet", "+3% lifesteal", "+1 shield
 charge"). Picking the same family again levels it up.
@@ -119,7 +119,7 @@ Relics can level (rarely offered as cards): each level makes the whole relic
 There is **no build limit** — stack as many powers as the run gives you, and a
 fused-away classic can be picked up fresh and grown again. Every fusion pair
 has its own **thematic name** (Lifesteal + Thorns = **Blood Barrier**,
-Chase + Fire Rounds = **Hellhound Rounds** — all 903 combinations are named),
+Chase + Fire Rounds = **Hellhound Rounds** — all 946 combinations are named),
 and the pause screen (`P`) lists every effect in plain numbers.
 
 ## Controls
@@ -130,13 +130,15 @@ and the pause screen (`P`) lists every effect in plain numbers.
 |---|---|
 | `WASD` / arrows | move |
 | `Shift` | focus — slow, precise movement (your red hitbox dot is always visible) |
+| `F` | game speed ×1 → ×2 → ×3 → ×4 (whole sim fast-forwards) |
 | `P` / `Esc` | pause + full build breakdown |
 | `M` | mute |
 
 **Mobile / touch** — drag anywhere on the battlefield to steer with a floating
 analog joystick: a full drag is full speed, a **light drag moves you slowly**
 (that's your focus mode, and it shows the hitbox). Tap **⏸** (top-right) for
-pause + build info. Level-up cards and menus are tappable.
+pause + build info, or **▶▶** next to it to cycle game speed. Level-up cards
+and menus are tappable.
 
 Readability rules: enemy bullets are magenta/white and always drawn on top;
 your bullets are quiet cyan; bosses (every 10th wave) get a name and an HP bar.

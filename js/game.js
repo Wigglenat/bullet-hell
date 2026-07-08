@@ -176,6 +176,20 @@ cv.addEventListener('touchcancel', joyEnd);
 const ST = { TITLE: 0, PLAY: 1, LEVELUP: 2, PAUSE: 3, DEAD: 4 };
 let state = ST.TITLE;
 
+// Game speed — fast-forward the whole sim (×1 → ×2 → ×3 → ×4). Everything runs
+// identically, just faster: more fixed steps per rendered frame.
+const SIM_SPEEDS = [1, 2, 3, 4];
+let simSpeed = 1;
+function setSimSpeed(v) {
+  simSpeed = SIM_SPEEDS.includes(v) ? v : 1;
+  const b = document.getElementById('btnSpeed');
+  if (b) { b.textContent = '▶▶ ' + simSpeed + '×'; b.classList.toggle('hot', simSpeed > 1); }
+  if (G.floats) announce('GAME SPEED ×' + simSpeed, '#8ae8ff');
+}
+function cycleSpeed() {
+  setSimSpeed(SIM_SPEEDS[(SIM_SPEEDS.indexOf(simSpeed) + 1) % SIM_SPEEDS.length]);
+}
+
 const store = (() => { try { const s = window.localStorage; s.getItem('x'); return s; } catch (e) { return null; } })();
 let bestWave = +((store && (store.getItem('spacesouls.bestWave') || store.getItem('myriad.bestWave'))) || 0);
 let bestScore = +((store && store.getItem('spacesouls.bestScore')) || 0);
@@ -196,7 +210,7 @@ function newRun() {
     healAcc: 0, healT: 0, xpAcc: 0, xpT: 0, prevSyn: [], pools: [],
     eliteT: 20, eliteSpoils: 0,
     enemies: [], pB: [], eB: [], gems: [], parts: [], zones: [], beams: [], floats: [],
-    turrets: [], vortices: [],
+    turrets: [], vortices: [], booms: [],
     spawnT: 1.0, bossAlive: null, bannerQ: [], bannerT: 0,
   });
   document.getElementById('bossBar').classList.remove('on');
@@ -231,7 +245,7 @@ function recompute() {
     scav: 0, xpMult: 1, adren: 0, hitR: 3.5,
     drones: 0, missiles: 0, missileCd: 0, boom: 0,
     frost: 0, knock: 0, turrets: 0, turretCd: 0, vortex: 0, vortexCd: 0,
-    graze: 0, grazeR: 0, grazeHeat: 0, ram: 0,
+    graze: 0, grazeR: 0, grazeHeat: 0, ram: 0, range: 1,
     syn: {}, synList: [], bulletCol: '#6edcff',
   };
   s.dmg *= 1 + 0.04 * G.ess.dmg;
@@ -289,6 +303,7 @@ function recompute() {
       case 'graze':     s.graze += L; s.grazeR = Math.min(64, 30 + 2.5 * L);
                         s.grazeHeat = Math.min(0.5, 0.05 * L + s.grazeHeat); break;
       case 'ram':       s.ram += 0.35 * L; break;
+      case 'range':     s.range = Math.min(3, s.range + 0.20 * L); break; // shots travel farther
     }
   });
   for (const u of G.units) walkSpecials(u, (sp) => {
@@ -667,11 +682,16 @@ function aimAngle() {
 function fireFan(a0, n, dmgMult) {
   const s = G.stats;
   const spread = Math.min(0.55, 0.085 * (n - 1));
+  // Bouncing shots must LIVE long enough to actually reach a wall: on desktop
+  // the zoomed-out arena is far wider than 1.5s of flight, so each bounce
+  // grants the time to cross most of the arena (small screens ≈ old behavior).
+  const crossT = s.bounce > 0 ? Math.max(W, H) * 0.6 / s.speed : 0;
+  const life = (1.5 + s.bounce * Math.max(0.5, crossT)) * s.range;
   for (let i = 0; i < n; i++) {
     const a = n === 1 ? a0 : a0 - spread / 2 + spread * (i / (n - 1));
     poolPush(G.pB, CAP.pB, {
       x: G.px, y: G.py, vx: Math.cos(a) * s.speed, vy: Math.sin(a) * s.speed,
-      t: 0, life: 1.5 + s.bounce * 0.5, size: s.size, dmg: s.dmg * dmgMult,
+      t: 0, life, size: s.size, dmg: s.dmg * dmgMult,
       pierce: s.pierce, bounce: s.bounce, homing: s.homing, hit: null,
     });
   }
@@ -696,7 +716,7 @@ function fireVolley() {
     const p = dronePos(i, s.drones);
     poolPush(G.pB, CAP.pB, {
       x: p.x, y: p.y, vx: Math.cos(a0) * s.speed, vy: Math.sin(a0) * s.speed,
-      t: 0, life: 1.5, size: s.size * 0.8, dmg: s.dmg * 0.5,
+      t: 0, life: 1.5 * s.range, size: s.size * 0.8, dmg: s.dmg * 0.5,
       pierce: s.pierce, bounce: 0, homing: s.homing, hit: null,
     });
   }
@@ -708,7 +728,7 @@ function fireMissiles() {
     const a = Math.atan2(G.faceY, G.faceX) + Math.PI + rand(-0.6, 0.6); // launch backward, curl in
     poolPush(G.pB, CAP.pB, {
       x: G.px, y: G.py, vx: Math.cos(a) * 240, vy: Math.sin(a) * 240,
-      t: 0, life: 2.6, size: 5, dmg: s.dmg * 0.9,
+      t: 0, life: 2.6 * s.range, size: 5, dmg: s.dmg * 0.9,
       pierce: 0, bounce: 0, homing: 4.5, hit: null, mBlast: true,
     });
   }
@@ -721,7 +741,7 @@ function fireNova() {
     const a = off + TAU * i / n;
     poolPush(G.pB, CAP.pB, {
       x: G.px, y: G.py, vx: Math.cos(a) * 300, vy: Math.sin(a) * 300,
-      t: 0, life: 1.1, size: s.size * 0.9, dmg: s.dmg * 0.8,
+      t: 0, life: 1.1 * s.range, size: s.size * 0.9, dmg: s.dmg * 0.8,
       pierce: s.pierce, bounce: 0, homing: 0, hit: null, chill: s.syn.icering,
     });
   }
@@ -743,12 +763,12 @@ function fireLaser() {
   const s = G.stats, t = nearestEnemy(G.px, G.py);
   if (!t) return;
   const a = Math.atan2(t.y - G.py, t.x - G.px);
-  beamFrom(G.px, G.py, a, s.dmg * (1.2 + 0.35 * s.laserLv), 9 + s.laserLv, 620);
+  beamFrom(G.px, G.py, a, s.dmg * (1.2 + 0.35 * s.laserLv), 9 + s.laserLv, 620 * s.range);
   if (s.syn.beamdrones && s.drones > 0) { // SYNERGY: every drone fires a mini-beam
     for (let i = 0; i < s.drones; i++) {
       const p = dronePos(i, s.drones);
       const t2 = nearestEnemy(p.x, p.y);
-      if (t2) beamFrom(p.x, p.y, Math.atan2(t2.y - p.y, t2.x - p.x), s.dmg * 0.5, 4, 420);
+      if (t2) beamFrom(p.x, p.y, Math.atan2(t2.y - p.y, t2.x - p.x), s.dmg * 0.5, 4, 420 * s.range);
     }
   }
 }
@@ -762,6 +782,7 @@ function bomb(x, y, r, dmg) {
   nearEnemies(x, y, r, _near);
   for (const en of _near) if (en.hp > 0 && dist2(x, y, en.x, en.y) < (r + en.r) * (r + en.r)) hitEnemy(en, dmg);
   burst(x, y, '#ffd24a', 22, 340);
+  boomFx(x, y, r * 0.7);
   G.beams.push({ ring: true, x, y, r, t: 0, life: 0.3, color: '#ffd24a' });
 }
 
@@ -877,7 +898,7 @@ function killEnemy(en) {
   if (s.splitShards > 0) {
     for (let k = 0; k < s.splitShards; k++) {
       const a = Math.random() * TAU;
-      poolPush(G.pB, CAP.pB, { x: en.x, y: en.y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, t: 0, life: s.shardHoming ? 1.1 : 0.55, size: 3.5, dmg: s.dmg * 0.4, pierce: 0, bounce: 0, homing: s.shardHoming ? 3.5 : 0, hit: null });
+      poolPush(G.pB, CAP.pB, { x: en.x, y: en.y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, t: 0, life: (s.shardHoming ? 1.1 : 0.55) * s.range, size: 3.5, dmg: s.dmg * 0.4, pierce: 0, bounce: 0, homing: s.shardHoming ? 3.5 : 0, hit: null });
     }
   }
   if (s.sparks) blast(en.x, en.y, 46, s.dmg * 0.5);
@@ -902,7 +923,24 @@ function killEnemy(en) {
 function blast(x, y, r, dmg) {
   nearEnemies(x, y, r, _near);
   for (const en of _near) if (en.hp > 0 && dist2(x, y, en.x, en.y) < (r + en.r) * (r + en.r)) hitEnemy(en, dmg, true);
-  burst(x, y, '#ffb454', 6, 180);
+  boomFx(x, y, r);
+}
+
+// A REAL explosion you can't miss: hot core flash + expanding shockwave ring
+// (rendered additively) + fire debris + drifting embers.
+function boomFx(x, y, r) {
+  poolPush(G.booms, 30, { x, y, r, t: 0, life: 0.3 + Math.min(0.25, r * 0.0015) });
+  burst(x, y, '#ffd24a', 6, 300);
+  burst(x, y, '#ff8a3a', 8, 210);
+  for (let i = 0; i < 4; i++) { // embers drift up and linger
+    const a = Math.random() * TAU, sp = rand(20, 80);
+    poolPush(G.parts, CAP.parts, {
+      x: x + Math.cos(a) * r * 0.3, y: y + Math.sin(a) * r * 0.3,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 50,
+      t: 0, life: rand(0.5, 0.9), color: '#ffb454', size: rand(1.5, 2.6),
+    });
+  }
+  if (r >= 60) G.shake = Math.max(G.shake, Math.min(5, r * 0.04));
 }
 
 // ---------------------------------------------------------------------------
@@ -1140,6 +1178,15 @@ function updateEnemy(en, dt) {
     en.burnT -= dt;
     en.hp -= en.burnDps * dt;
     G.dmgDealt += en.burnDps * dt;
+    en.emberT = (en.emberT || 0) - dt; // shed glowing embers while burning
+    if (en.emberT <= 0) {
+      en.emberT = 0.11;
+      poolPush(G.parts, CAP.parts, {
+        x: en.x + rand(-0.7, 0.7) * en.r, y: en.y + rand(-0.7, 0.7) * en.r,
+        vx: rand(-20, 20), vy: -rand(50, 110),
+        t: 0, life: rand(0.35, 0.6), color: Math.random() < 0.5 ? '#ffd24a' : '#ff7a2a', size: rand(1.5, 3),
+      });
+    }
     if (en.hp <= 0) { killEnemy(en); return; }
   }
   const sp = en.speed * slowFactorAt(en.x, en.y) * (en.chillT > 0 ? 1 - en.chillF : 1);
@@ -1570,7 +1617,7 @@ function update(dt) {
       const t = nearestEnemy(tr.x, tr.y);
       if (!t) break;
       const a = Math.atan2(t.y - tr.y, t.x - tr.x);
-      poolPush(G.pB, CAP.pB, { x: tr.x, y: tr.y, vx: Math.cos(a) * 380, vy: Math.sin(a) * 380, t: 0, life: 1.4, size: 4.5, dmg: s.dmg * 0.55, pierce: 0, bounce: 0, homing: 0, hit: null, mBlast: s.syn.missilebattery }); // SYNERGY: exploding turret shots
+      poolPush(G.pB, CAP.pB, { x: tr.x, y: tr.y, vx: Math.cos(a) * 380, vy: Math.sin(a) * 380, t: 0, life: 1.4 * s.range, size: 4.5, dmg: s.dmg * 0.55, pierce: 0, bounce: 0, homing: 0, hit: null, mBlast: s.syn.missilebattery }); // SYNERGY: exploding turret shots
     }
   }
   if (s.vortex > 0) {                                             // Vortex rifts
@@ -1692,7 +1739,7 @@ function update(dt) {
             if (s.syn.cluster) { // SYNERGY: cluster warheads
               for (let k = 0; k < 3; k++) {
                 const ca = Math.random() * TAU;
-                poolPush(G.pB, CAP.pB, { x: b.x, y: b.y, vx: Math.cos(ca) * 300, vy: Math.sin(ca) * 300, t: 0, life: 0.9, size: 3.5, dmg: b.dmg * 0.35, pierce: 0, bounce: 0, homing: 3.5, hit: null });
+                poolPush(G.pB, CAP.pB, { x: b.x, y: b.y, vx: Math.cos(ca) * 300, vy: Math.sin(ca) * 300, t: 0, life: 0.9 * s.range, size: 3.5, dmg: b.dmg * 0.35, pierce: 0, bounce: 0, homing: 3.5, hit: null });
               }
             }
             dead = true; break;
@@ -1719,6 +1766,16 @@ function update(dt) {
     const pl = G.pools[i];
     pl.t += dt;
     if (pl.t >= pl.dur) { G.pools.splice(i, 1); continue; }
+    pl.ember = (pl.ember || 0) - dt; // flames rise from the burning ground
+    if (pl.ember <= 0) {
+      pl.ember = 0.06;
+      const a = Math.random() * TAU, rr = Math.sqrt(Math.random()) * pl.r * 0.9;
+      poolPush(G.parts, CAP.parts, {
+        x: pl.x + Math.cos(a) * rr, y: pl.y + Math.sin(a) * rr,
+        vx: rand(-14, 14), vy: -rand(45, 100),
+        t: 0, life: rand(0.4, 0.75), color: Math.random() < 0.4 ? '#ffd24a' : '#ff7a2a', size: rand(1.6, 3),
+      });
+    }
     nearEnemies(pl.x, pl.y, pl.r, _near);
     for (const en of _near) {
       if (en.hp <= 0) continue;
@@ -1813,6 +1870,11 @@ function update(dt) {
   for (let i = G.beams.length - 1; i >= 0; i--) {
     if ((G.beams[i].t += dt) >= G.beams[i].life) G.beams.splice(i, 1);
   }
+  for (let i = G.booms.length - 1; i >= 0; i--) {
+    const bo = G.booms[i];
+    bo.t += dt;
+    if (bo.t >= bo.life) { G.booms[i] = G.booms[G.booms.length - 1]; G.booms.pop(); }
+  }
   if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30);
 
   // gain ticks — "+HP" / "+XP" floaters so increases are visible
@@ -1878,14 +1940,21 @@ function render() {
     ctx.beginPath(); ctx.arc(G.px, G.py, s.grazeR, 0, TAU); ctx.stroke();
   }
 
-  // napalm pools
+  // napalm pools — burning ground with a molten core
   for (const pl of G.pools) {
     const k = 1 - pl.t / pl.dur;
+    const flick = Math.sin(G.time * 11 + pl.x);
     ctx.fillStyle = '#ff7a2a';
-    ctx.globalAlpha = 0.14 * k + 0.05 * Math.sin(G.time * 11 + pl.x);
+    ctx.globalAlpha = 0.26 * k + 0.07 * flick;
     ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffb45a';
+    ctx.globalAlpha = 0.3 * k + 0.08 * Math.sin(G.time * 15 + pl.y);
+    ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r * (0.55 + 0.06 * flick), 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffe9a0';
+    ctx.globalAlpha = 0.22 * k;
+    ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r * 0.22, 0, TAU); ctx.fill();
     ctx.strokeStyle = '#ffb45a';
-    ctx.globalAlpha = 0.3 * k;
+    ctx.globalAlpha = 0.5 * k;
     ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r, 0, TAU); ctx.stroke();
     ctx.globalAlpha = 1;
   }
@@ -1982,10 +2051,21 @@ function render() {
         ctx.globalAlpha = 1;
       }
     }
-    if (en.burnT > 0) { // on fire
-      ctx.fillStyle = '#ff8a2a';
-      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(en.t * 14);
-      ctx.beginPath(); ctx.arc(en.x, en.y - en.r * 0.4, en.r * 0.55, 0, TAU); ctx.fill();
+    if (en.burnT > 0) { // ON FIRE — licking flame tongues, impossible to miss
+      const base = en.y + en.r * 0.25;
+      for (let fi = 0; fi < 3; fi++) {
+        const ph = en.t * (13 + fi * 4) + fi * 2.1;
+        const fx = en.x + Math.sin(ph * 0.6) * en.r * 0.5;
+        const h = en.r * (1.1 + 0.5 * Math.sin(ph)) * (fi === 1 ? 1.6 : 1.1);
+        const wF = en.r * (fi === 1 ? 0.45 : 0.32);
+        ctx.fillStyle = fi === 1 ? '#ffd24a' : '#ff7a2a';
+        ctx.globalAlpha = 0.55 + 0.25 * Math.sin(ph * 1.7);
+        ctx.beginPath();
+        ctx.moveTo(fx - wF, base);
+        ctx.quadraticCurveTo(fx - wF * 0.3, base - h * 0.55, fx + Math.sin(ph) * 3, base - h);
+        ctx.quadraticCurveTo(fx + wF * 0.3, base - h * 0.55, fx + wF, base);
+        ctx.closePath(); ctx.fill();
+      }
       ctx.globalAlpha = 1;
     }
     if (en.type === 'charger' && en.mode === 'wind') { // dash telegraph
@@ -2069,6 +2149,25 @@ function render() {
     ctx.fillRect(0, -bm.w * k * 0.3, bm.len, bm.w * 0.6 * k);
     ctx.restore();
     ctx.globalAlpha = 1;
+  }
+
+  // explosions — additive fireball: hot core, orange bloom, expanding shockwave
+  if (G.booms && G.booms.length) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (const bo of G.booms) {
+      const k = bo.t / bo.life, ik = 1 - k;
+      const R = bo.r * (0.5 + 0.75 * k);
+      ctx.fillStyle = '#ff7a2a'; ctx.globalAlpha = 0.38 * ik;
+      ctx.beginPath(); ctx.arc(bo.x, bo.y, R, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffc254'; ctx.globalAlpha = 0.55 * ik;
+      ctx.beginPath(); ctx.arc(bo.x, bo.y, R * 0.62, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fff6d8'; ctx.globalAlpha = 0.9 * ik * ik;
+      ctx.beginPath(); ctx.arc(bo.x, bo.y, R * 0.32, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#ffd9a0'; ctx.globalAlpha = 0.8 * ik; ctx.lineWidth = 2 + 3 * ik;
+      ctx.beginPath(); ctx.arc(bo.x, bo.y, bo.r * (0.35 + 0.9 * k), 0, TAU); ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
   }
 
   // player — bright, unmissable
@@ -2230,6 +2329,7 @@ function buildRecapHTML() {
     (s.arc ? ` · arc ${Math.round(s.arc * 100)}%` : '') + (s.cull ? ` · cull <${Math.round(s.cull * 100)}%` : '') +
     (s.burn ? ` · burn ${Math.round(s.burn * 100)}%` : '') +
     (s.splashR ? ` · splash ${Math.round(s.splashR)}px` : '') +
+    (s.range > 1 ? ` · range +${Math.round((s.range - 1) * 100)}%` : '') +
     (s.xpMult > 1 ? ` · xp +${Math.round((s.xpMult - 1) * 100)}%` : '') +
     (s.hitR < 3.5 ? ` · hitbox −${Math.round((1 - s.hitR / 3.5) * 100)}%` : '');
   const synLine = s.synList.length
@@ -2269,6 +2369,7 @@ function handleKey(k) {
   if (state === ST.PLAY) {
     if (k === 'p' || k === 'escape') openPause();
     else if (k === 'm') SFX.toggle();
+    else if (k === 'f') cycleSpeed();
   } else if (state === ST.PAUSE && (k === 'p' || k === 'escape')) {
     closeOverlays(); state = ST.PLAY;
   } else if (state === ST.TITLE && k === 'enter') startGame();
@@ -2278,6 +2379,7 @@ $('btnPause').addEventListener('click', () => {
   if (state === ST.PLAY) openPause();
   else if (state === ST.PAUSE) { closeOverlays(); state = ST.PLAY; }
 });
+$('btnSpeed').addEventListener('click', () => { if (state === ST.PLAY) cycleSpeed(); });
 
 function startGame() {
   SFX.init();
@@ -2308,9 +2410,9 @@ function frame(now) {
   last = now;
   if (ft > 0.1) ft = 0.1;
   if (state === ST.PLAY) {
-    acc += ft;
+    acc += ft * simSpeed;
     let n = 0;
-    while (acc >= STEP && n++ < 4) { update(STEP); acc -= STEP; }
+    while (acc >= STEP && n++ < 4 * simSpeed) { update(STEP); acc -= STEP; }
     if (acc >= STEP) acc = 0;
     updateHUD();
   }
@@ -2352,7 +2454,9 @@ window.__GAME__ = {
   },
   SYNERGIES, synergiesOfUnit,
   fireVolley, fireLaser, spawnElite, startSuperBoss, totalWave, wardenTier, WARDEN_TIERS, ETYPES, waveScale, maxShooters, shooterCount,
-  hitEnemy,
+  hitEnemy, blast, boomFx,
+  setSimSpeed, cycleSpeed,
+  get simSpeed() { return simSpeed; },
   kill(en) { killEnemy(en); },
   get world() { return { W, H, zoom: ZOOM }; },
   unitSummary, autoFuse, makeFamilyUnit,

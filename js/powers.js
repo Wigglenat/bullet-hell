@@ -109,6 +109,8 @@ const FAMILIES = {
     desc: 'Bullets that barely miss you grant XP and heat up your damage.', next: 'wider ring, more heat' },
   ram:       { name: 'Ram',         cat: 'DEF',  adj: 'Rampaging', noun: 'Ram',
     desc: 'Slamming into enemies hurts THEM.',            next: 'harder ramming' },
+  range:     { name: 'Range',       cat: 'ATK',  adj: 'Horizon',   noun: 'Reach',
+    desc: 'Shots fly farther before fading out (laser reaches too).', next: '+20% shot range' },
 };
 const FAMILY_KEYS = Object.keys(FAMILIES);
 const FAMILY_MAX = 9;
