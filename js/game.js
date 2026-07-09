@@ -376,30 +376,30 @@ function recompute() {
         s.lifesteal = Math.min(0.6, s.lifesteal + 0.25);
         s.rebirth = true;
         break;
-      case 'horizon':
-        s.slowR = Math.max(s.slowR, 480);
-        s.slowEnemy = Math.max(s.slowEnemy, 0.6);
-        s.slowBullet = Math.max(s.slowBullet, 0.6);
-        s.pulse = 10;
+      case 'horizon': // every level: wider, thicker, faster-pulsing field
+        s.slowR = Math.max(s.slowR, Math.round(480 * k));
+        s.slowEnemy = Math.min(0.8, Math.max(s.slowEnemy, 0.6 + 0.2 * (k - 1)));
+        s.slowBullet = Math.min(0.8, Math.max(s.slowBullet, 0.6 + 0.2 * (k - 1)));
+        s.pulse = Math.max(4, 10 / k);
         break;
-      case 'firstlight':
+      case 'firstlight': // every level: stronger AND faster mega-laser
         s.laserLv += 8 * k;
-        s.laserCd = 1.5;
+        s.laserCd = Math.max(0.6, 1.5 / k);
         s.crit += 0.5;
-        s.critMult = 4;
+        s.critMult = Math.max(s.critMult, 4);
         break;
-      case 'swarm':
-        s.orbitals = Math.min(20, s.orbitals + 8);
-        s.splitShards = Math.min(20, s.splitShards + 6);
+      case 'swarm': // every level: more blades, more shards
+        s.orbitals = Math.min(20, s.orbitals + Math.round(8 * k));
+        s.splitShards = Math.min(20, s.splitShards + Math.round(6 * k));
         s.shardHoming = true;
         break;
-      case 'omega':
+      case 'omega': // every level: faster barrage, more shields, bigger splash
         s.barrage = true;
         s.barrageCd = Math.max(6, 12 / k);
-        s.shieldMax += 3;
+        s.shieldMax += Math.round(3 * k);
         s.shieldRegen *= 0.5;
-        s.splashR = Math.max(s.splashR, 90);
-        s.splashDmg = Math.max(s.splashDmg, 0.6);
+        s.splashR = Math.max(s.splashR, Math.round(90 * Math.sqrt(k)));
+        s.splashDmg = Math.max(s.splashDmg, 0.6 * k);
         break;
     }
   }
@@ -455,6 +455,9 @@ function applyCard(card) {
   } else if (card.type === 'primordial') {
     G.units.push(makePrimordialUnit(card.key));
     if (card.key === 'genesis' && G.rampStart === null) G.rampStart = G.time;
+    // a relic should announce itself NOW, not when a stale timer runs out
+    if (card.key === 'omega') G.barrageT = Math.min(G.barrageT, 2.5);
+    if (card.key === 'firstlight') G.laserT = Math.min(G.laserT, 1);
     G.bannerQ.push({
       title: '🜏 PRIMORDIAL — ' + PRIMORDIALS[card.key].name,
       subtitle: PRIMORDIALS[card.key].desc,
@@ -1987,6 +1990,17 @@ function render() {
     ctx.strokeStyle = 'rgba(130, 240, 255, 0.22)';
     ctx.beginPath(); ctx.arc(G.px, G.py, s.slowR, 0, TAU); ctx.stroke();
   }
+  // slow field — a visible temporal bubble (Slow Field / EVENT HORIZON / Static Field)
+  if (s && s.slowR > 0) {
+    const breathe = 1 + 0.01 * Math.sin(G.time * 2);
+    ctx.fillStyle = 'rgba(120, 140, 255, .05)';
+    ctx.beginPath(); ctx.arc(G.px, G.py, s.slowR * breathe, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(150, 170, 255, .28)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(G.px, G.py, s.slowR * breathe, 0, TAU); ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
   // graze ring (glows while heat is active)
   if (s && s.graze > 0) {
     ctx.strokeStyle = G.heatT > 0 ? 'rgba(255,255,255,.5)' : 'rgba(255,255,255,.16)';

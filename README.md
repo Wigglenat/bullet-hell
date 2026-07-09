@@ -130,7 +130,11 @@ normal stat caps, **don't take a build slot**, and each one warps the run:
 | **OMEGA PROTOCOL** | apocalypse barrage every 12s, +3 shields at double regen, massive splash on every bullet |
 
 Relics can level (rare among the auto-grants): each level makes the whole
-relic +25% stronger.
+relic +25% stronger — a wider Horizon field with faster shockwaves, a quicker
+and hotter First Light, more Swarm blades and shards, faster Omega barrages
+with more shields. Relics also announce themselves **immediately** on pickup
+(the first barrage/beam fires within seconds, not on a stale timer), and the
+slow field is now drawn on the battlefield so you can see it working.
 
 There is **no build limit** — stack as many powers as the run gives you, and a
 fused-away classic can be picked up fresh and grown again. Every fusion pair
