@@ -286,7 +286,7 @@ function recompute() {
       case 'regen':     s.regen += 0.8 * L; break;
       case 'ghost':     s.ghostT += 0.3 * L; break;
       case 'speed':     s.moveSpd *= 1 + 0.07 * Math.min(L, 10); break;
-      case 'magnet':    s.magnetR *= 1 + 0.45 * L; break;
+      case 'magnet':    s.magnetR += 130 * L; break; // flat growth: the FIRST pick already jumps 90→220
       case 'slow':      s.slowR = Math.max(s.slowR, 90 + 22 * L);
                         s.slowEnemy = Math.min(0.7, Math.max(s.slowEnemy, 0.18 + 0.04 * L));
                         s.slowBullet = Math.min(0.6, Math.max(s.slowBullet, 0.10 + 0.035 * L)); break;
@@ -413,7 +413,7 @@ function recompute() {
   }
   if (s.syn.stormseek) s.arc = Math.min(0.8, s.arc + 0.15);
   if (s.syn.phantomneedle) s.hitR = Math.max(1.3, s.hitR * 0.85);
-  if (s.syn.goldrush) { s.magnetR = Math.max(s.magnetR, Math.max(W, H)); s.xpMult += 0.25; } // gems from anywhere
+  if (s.syn.goldrush) { s.magnetR = Math.max(s.magnetR, Math.hypot(W, H)); s.xpMult += 0.25; } // gems from anywhere — even corner to corner
 
   // bullet tint — your shots visibly carry your build's elements
   const TINTS = { bomb: '#ff8a3a', frost: '#7adfff', arc: '#ffe94a', boom: '#ff6a4a', chase: '#c8a0ff', crit: '#ffd24a' };
@@ -612,6 +612,20 @@ function autoLevelUp(slot) {
 // ---------------------------------------------------------------------------
 const CAP = { pB: 1400, eB: 700, enemies: 200, parts: 350, gems: 400 };
 function poolPush(arr, cap, obj) { if (arr.length >= cap) arr.shift(); arr.push(obj); return obj; }
+// Gems evict the FARTHEST gem when full — never one being magnet-pulled to you.
+// (A bigger magnet radius genuinely rescues XP that would otherwise be culled.)
+function gemPush(obj) {
+  if (G.gems.length >= CAP.gems) {
+    let far = 0, fd = -1;
+    for (let i = 0; i < G.gems.length; i++) {
+      const q = dist2(G.gems[i].x, G.gems[i].y, G.px, G.py);
+      if (q > fd) { fd = q; far = i; }
+    }
+    G.gems.splice(far, 1);
+  }
+  G.gems.push(obj);
+  return obj;
+}
 
 function spawnEB(o) {
   return poolPush(G.eB, CAP.eB, Object.assign({ x: 0, y: 0, vx: 0, vy: 0, t: 0, life: 7, size: 5, dmg: 10 }, o));
@@ -855,10 +869,10 @@ function killEnemy(en) {
   const s = G.stats;
   const gems = en.superBoss ? 40 : en.phantom ? 3 : en.boss ? 30 : en.elite ? 8 : 1;
   for (let i = 0; i < gems; i++) {
-    poolPush(G.gems, CAP.gems, { x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp / gems)), t: 0 });
+    gemPush({ x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp / gems)), t: 0 });
   }
   if (s.bonusGem > 0 && Math.random() < s.bonusGem) { // Greed — a bonus gem on top
-    poolPush(G.gems, CAP.gems, { x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp * 0.5)), t: 0 });
+    gemPush({ x: en.x + rand(-en.r, en.r), y: en.y + rand(-en.r, en.r), v: Math.max(1, Math.round(en.xp * 0.5)), t: 0 });
   }
   if (en.superBoss) { // a Warden falls
     const tier = en.wtier || 'sector';
@@ -910,7 +924,7 @@ function killEnemy(en) {
   if (s.kilnova > 0 && Math.random() < s.kilnova) blast(en.x, en.y, 90, s.dmg * 1.2);
   if (s.syn.killfrenzy) G.adrenT = Math.max(G.adrenT, 1.2); // SYNERGY: kills surge fire rate
   if (s.scav > 0 && Math.random() < s.scav) {
-    poolPush(G.gems, CAP.gems, { x: en.x, y: en.y, v: 0, heal: 7, t: 0 }); // Scavenger orb
+    gemPush({ x: en.x, y: en.y, v: 0, heal: 7, t: 0 }); // Scavenger orb
   }
   if (en.boss) {
     G.bossAlive = null;
@@ -1881,9 +1895,16 @@ function update(dt) {
     const d2 = dist2(g.x, g.y, G.px, G.py);
     if (d2 < magR * magR) {
       const d = Math.sqrt(d2) || 1;
-      g.x += (G.px - g.x) / d * 480 * dt; g.y += (G.py - g.y) / d * 480 * dt;
+      const spd = Math.max(480, 2.2 * d); // distant gems STREAK in, they don't drizzle
+      g.x += (G.px - g.x) / d * spd * dt; g.y += (G.py - g.y) / d * spd * dt;
+      if (Math.random() < 10 * dt) { // green comet tail while being pulled
+        poolPush(G.parts, CAP.parts, {
+          x: g.x, y: g.y, vx: -(G.px - g.x) / d * 60, vy: -(G.py - g.y) / d * 60,
+          t: 0, life: 0.25, color: '#54d68a', size: 2,
+        });
+      }
     }
-    if (d2 < 20 * 20) {
+    if (dist2(g.x, g.y, G.px, G.py) < 20 * 20) {
       if (g.heal) { // Scavenger healing orb
         G.hp = Math.min(s.maxHp, G.hp + g.heal);
         if (s.syn.bonemarrow) { G.marrow++; recompute(); G.hp = Math.min(G.stats.maxHp, G.hp + 1); } // SYNERGY: +1 max HP forever
@@ -1983,13 +2004,6 @@ function render() {
 
   const s = G.stats;
 
-  // slow field
-  if (s && s.slowR > 0) {
-    ctx.fillStyle = 'rgba(130, 240, 255, 0.05)';
-    ctx.beginPath(); ctx.arc(G.px, G.py, s.slowR, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(130, 240, 255, 0.22)';
-    ctx.beginPath(); ctx.arc(G.px, G.py, s.slowR, 0, TAU); ctx.stroke();
-  }
   // slow field — a visible temporal bubble (Slow Field / EVENT HORIZON / Static Field)
   if (s && s.slowR > 0) {
     const breathe = 1 + 0.01 * Math.sin(G.time * 2);
@@ -2005,6 +2019,13 @@ function render() {
   if (s && s.graze > 0) {
     ctx.strokeStyle = G.heatT > 0 ? 'rgba(255,255,255,.5)' : 'rgba(255,255,255,.16)';
     ctx.beginPath(); ctx.arc(G.px, G.py, s.grazeR, 0, TAU); ctx.stroke();
+  }
+
+  // magnet ring — your gem-pull reach (Gold Rush is arena-wide, no ring needed)
+  if (s && s.magnetR > 90 && !s.syn.goldrush) {
+    const mb = 1 + 0.012 * Math.sin(G.time * 2.6);
+    ctx.strokeStyle = 'rgba(84, 214, 138, .17)';
+    ctx.beginPath(); ctx.arc(G.px, G.py, s.magnetR * mb, 0, TAU); ctx.stroke();
   }
 
   // napalm pools — burning ground with a molten core
@@ -2399,6 +2420,7 @@ function buildRecapHTML() {
     (s.range > 1 ? ` · range +${Math.round((s.range - 1) * 100)}%` : '') +
     (s.xpMult > 1 ? ` · xp +${Math.round((s.xpMult - 1) * 100)}%` : '') +
     (s.bonusGem > 0 ? ` · bonus gems ${Math.round(s.bonusGem * 100)}%` : '') +
+    (s.magnetR > 90 ? ` · magnet ${Math.round(s.magnetR)}px` : '') +
     (s.hitR < 3.5 ? ` · hitbox −${Math.round((1 - s.hitR / 3.5) * 100)}%` : '');
   const synLine = s.synList.length
     ? `<div style="margin-top:8px;color:#ffd24a;font-size:12px">SYNERGIES: ${s.synList.map(x => `<b>${x.name}</b> — ${x.desc}`).join(' · ')}</div>` : '';

@@ -16,7 +16,7 @@ the 42 classics:
 
 | Attack | Defense | Utility |
 |---|---|---|
-| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Fire Rounds (burn), Splash Rounds (AoE), Explosive Rounds, Frost Shot, Impact, Turret, Vortex, Range (+20% shot range per level — beat the drop-off) | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger | Speed, Magnetic, Slow Field, Greed (richer gems + bonus drops), Adrenaline, Shrink, Graze |
+| + Bullets, Chase (homing), Pierce, Bounce, Rapid Fire, Big Shots, Split, Critical, Orbitals, Nova, Laser, Rear Guard, Side Cannons, Chain Arc, Executioner, Velocity, Drones, Missiles, Fire Rounds (burn), Splash Rounds (AoE), Explosive Rounds, Frost Shot, Impact, Turret, Vortex, Range (+20% shot range per level — beat the drop-off) | Lifesteal, Shield, Vitality, Regen, Ghost, Thorns, Armor, Evasion, Scavenger | Speed, Magnetic (+130 gem-pull range per level, visible ring), Slow Field, Greed (richer gems + bonus drops), Adrenaline, Shrink, Graze |
 
 The draw is weighted toward **deepening what you already own** — especially
 powers one level from fusing — so merges keep happening. Check your full

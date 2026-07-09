@@ -60,7 +60,7 @@ const FAMILIES = {
   speed:     { name: 'Speed',       cat: 'UTIL', adj: 'Swift',    noun: 'Dash',
     desc: 'Move faster.',                                 next: '+7% move speed' },
   magnet:    { name: 'Magnetic',    cat: 'UTIL', adj: 'Magnetic', noun: 'Pull',
-    desc: 'Pull XP gems from farther away.',              next: '+45% pull radius' },
+    desc: 'Pull XP gems from much farther away — they streak to you.', next: '+130 pull range' },
   slow:      { name: 'Slow Field',  cat: 'UTIL', adj: 'Temporal', noun: 'Field',
     desc: 'Enemies AND their bullets crawl near you.',    next: 'wider, stronger field' },
   bomb:      { name: 'Fire Rounds', cat: 'ATK',  adj: 'Burning',  noun: 'Inferno',
